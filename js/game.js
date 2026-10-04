@@ -546,11 +546,12 @@ export class Game {
         for (let j = 0; j < b.n; j++) if (j !== i) traw += u[j] * b.val[j];
         b.kind[i] = EMPTY;
         b.rebuild();
-        const score = (traw - at.raw) * (1 + (at.down > 0 ? 0 : 0));
+        // stones do not change how much sand leaves a table, so only this table's value matters
+        const score = traw - at.raw;
         if (!best || score > best.score) best = { t, i, score };
       }
     }
-    if (best && best.score > 0) return best;
+    if (best && best.score > a.raw * 1e-4) return best;
     return null;
   }
 

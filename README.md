@@ -35,8 +35,12 @@ enough and the famous fractal mandala appears.
 There are no dead ends: buildings can be rearranged freely at any time,
 doctrines can be changed every sweep, and income never stops.
 
-A full playthrough to the ending is roughly 4–5 hours of active play
-(longer if you play idly — the game keeps earning while the tab is closed).
+A full playthrough to the ending is roughly 4½–6 hours of play (about 4h40m
+if you play actively, longer if you play idly — the game keeps earning while
+the tab is closed). New mechanics keep arriving the whole way: the kiln at
+~20 minutes, stones within the hour, doctrines, the fold and prisms in the
+second hour, trials and a cascade of tables in the third, and the Great
+Hourglass in the fourth.
 
 ## Tips
 
@@ -90,6 +94,9 @@ millions of grains per second.
 ### Balancing
 
 `node tools/bot.mjs 5 active` plays five hours of the game in a few seconds
-and prints a timeline (profiles: `active`, `casual`, `idle`).
+and prints a timeline (profiles: `active`, `casual`, `idle`), and
+`node tools/summary.mjs` compares the profiles' milestones.
 `node tools/calibrate_seq.mjs tools/targets.json` re-tunes costs against the
-target schedule in `tools/targets.json`.
+target schedule in `tools/targets.json`, and `node tools/tune_late.mjs`
+jointly tunes trial goals and the late game. `node tools/test.mjs` runs the
+logic tests (also run by the deploy workflow).

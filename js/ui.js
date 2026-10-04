@@ -847,6 +847,7 @@ export class UI {
   confirmSweep() {
     const g = this.g, s = g.s;
     const gain = g.glassGain();
+    if (s.settings.confirmSweep === false && !s.trial) { this.doSweep(null); return; }
     const content = h('div', {},
       h('h2', {}, s.trial ? 'End the trial?' : 'Sweep the table?'),
       h('p', {}, gain > 0 ? `The kiln will give you ${fmt(gain)} glass.` : 'You will get no glass for this run.'),
@@ -1015,6 +1016,7 @@ export class UI {
     body.appendChild(h('div', { class: 'opt' }, h('span', {}, 'Volume'), vol));
     toggle('Auto-place new hourglasses, crystals and prisms', () => st.autoPlace, v => { st.autoPlace = v; }, 'New buildings go to the best spot (or your blueprint). Stones always wait for you.');
     toggle('Particles', () => st.particles !== false, v => { st.particles = v; });
+    toggle('Confirm before sweeping', () => st.confirmSweep !== false, v => { st.confirmSweep = v; });
     toggle('Reduce motion', () => st.reduceMotion, v => { st.reduceMotion = v; });
     if (g.fx.auto.size) {
       body.appendChild(h('h3', {}, 'Automation'));

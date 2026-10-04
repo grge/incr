@@ -95,7 +95,9 @@ export function simulate({ hours = 5, profile = 'active', verbose = false, noSwe
         note(`KILN ${k.name} (${fmt(k.cost)} glass)`);
         continue;
       }
-      if (g.s.glass >= pc && (!k || pc * 5 < k.cost)) { g.buyPolish(); continue; }
+      const gs = g.has('great') ? g.greatNext() : null;
+      const saveFor = Math.min(k ? k.cost : Infinity, gs && gs.glass ? gs.glass : Infinity);
+      if (g.s.glass >= pc && pc * 5 < saveFor) { g.buyPolish(); continue; }
       break;
     }
     while (g.canBuildGreat()) {
@@ -176,8 +178,8 @@ export function simulate({ hours = 5, profile = 'active', verbose = false, noSwe
         let trial = null;
         if (g.has('trials') && sinceTrial >= 1) {
           // easiest-looking open trial that has not failed recently
-          const open = D.TRIALS.filter(tr => !g.s.trials[tr.id] && Number.isFinite(tr.goal) && !(deferred[tr.id] > 0))
-            .sort((a, b) => a.goal - b.goal);
+          // in list order, like a player working down the tab
+          const open = D.TRIALS.filter(tr => !g.s.trials[tr.id] && Number.isFinite(tr.goal) && !(deferred[tr.id] > 0));
           for (const id in deferred) deferred[id]--;
           if (open.length) trial = open[0].id;
         }
