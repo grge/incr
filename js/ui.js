@@ -1,6 +1,8 @@
 // DOM user interface: header, board interaction, side panel tabs, toasts, modals.
 import * as D from './data.js';
-import { CRYSTAL, STONE, PRISM } from './sim.js';
+import { CRYSTAL, STONE, PRISM, T_GEODE, T_BEDROCK, T_SPRING, T_CRACK, T_DIG, T_SLOPE } from './sim.js';
+import { drawMinimap } from './render.js';
+import { describeFeatures } from './terrain.js';
 import { fmt, fmtInt, fmtTime, fmtMult } from './format.js';
 import * as audio from './audio.js';
 
@@ -27,18 +29,17 @@ function h(tag, attrs = {}, ...kids) {
 const ROMAN = ['I', 'II', 'III', 'IV', 'V'];
 const KIND_LABEL = { [CRYSTAL]: 'Crystal', [STONE]: 'Stone', [PRISM]: 'Prism' };
 
+// Unlocks that come from relics are explained by the relic itself.
 const UNLOCK_TIPS = {
-  crystal: ['Crystals', 'Topples on a crystal\'s cell are worth more. Put them where sand falls hardest — under your hourglasses is a fine start.'],
-  quake: ['Quake', 'Shake the table to scatter half a minute of sand across every cell at once.'],
+  crystal: ['Crystals', 'Crystals grow only on geodes (the glittering cells). Topples on a crystal are worth more — the richer the geode, the more. Steer your sand across them.'],
+  quake: ['Quake', 'Shake the table to scatter half a minute of sand across every cell at once. Quakes dig too.'],
   gleam: ['Glimmer', 'Watch for gleaming grains on the table and click them before they fade.'],
-  stone: ['Stones', 'Sand bounces off stones. Wall in your hourglasses — but leave a gap — and sand will linger, toppling again and again.'],
-  doctrine: ['Doctrines', 'Choose a doctrine in the Kiln. After this you can change it each time you sweep.'],
-  fold: ['The Fold', 'Fold the table with the ⇄ button. Sand can then only fall off the north and south edges.'],
-  prism: ['Prisms', 'A prism doubles the crystal multiplier of every crystal it touches (not diagonally). Crystals can touch several prisms.'],
-  trials: ['Trials', 'Trials are runs with strange rules. Finish one for a permanent reward.'],
   great: ['The Great Hourglass', 'A new tab has appeared. This is what all the sand was for.'],
   aftershock: ['Aftershock', 'For 10 seconds after each quake, dust is tripled.'],
+  tremor: ['Tremor Doctrine', 'A new doctrine is available in the Kiln.'],
 };
+const SLOPE_DIR = ['north', 'east', 'south', 'west'];
+const TERRAIN_FOUND = { [T_GEODE]: ['geode', 'geodes'], [T_DIG]: ['dig site', 'dig sites'], [T_SPRING]: ['spring', 'springs'], [T_BEDROCK]: ['bedrock', 'bedrock'], [T_SLOPE]: ['slope', 'slopes'], [T_CRACK]: ['crack', 'cracks'] };
 
 export class UI {
   constructor(game, renderer, hooks) {
@@ -132,6 +133,13 @@ export class UI {
         if (g.removeAt(this.table, i, e.shiftKey)) audio.buy();
         return;
       }
+      if (this.tool === 'shape') {
+        const what = g.shape(this.table, i);
+        if (what) audio.buy();
+        else if (b.terr[i] === T_BEDROCK && g.fx.pick > 0) this.toast('Pickaxe', `You have broken all the bedrock you can on this table this run (${g.fx.pick}).`, 'warn', 'shape');
+        else this.toast('Shape', this.shapeHelp(), 'info', 'shape');
+        return;
+      }
       const hasItem = b.hg[i] > 0 || b.kind[i] !== 0 || (b.funnel === i && this.table > 0);
       if (hasItem) {
         this.drag = {
@@ -151,7 +159,8 @@ export class UI {
       this.hover = i;
       if (this.drag) {
         this.drag.px = e.clientX; this.drag.py = e.clientY;
-        if (!this.drag.active && (Math.abs(e.clientX - this.drag.sx) + Math.abs(e.clientY - this.drag.sy) > 6)) {
+        // a drag only starts once the pointer leaves the cell it began on
+        if (!this.drag.active && i !== this.drag.from && (Math.abs(e.clientX - this.drag.sx) + Math.abs(e.clientY - this.drag.sy) > 6)) {
           this.drag.active = true;
           clearTimeout(this.drag.timer);
           cv.classList.add('dragging');
@@ -193,6 +202,12 @@ export class UI {
     if (ev) {
       audio.drop();
       this.clickedOnce = true;
+      if (this.pendingTips && this.pendingTips.length && !this._tipTimer) {
+        this._tipTimer = setTimeout(() => {
+          for (const tip of this.pendingTips) this.toast('New · ' + tip[0], tip[1], 'glass');
+          this.pendingTips = [];
+        }, 4000);
+      }
       const now = performance.now();
       if (this.pointer && (!this._lastFloat || now - this._lastFloat > 110)) {
         this._lastFloat = now;
@@ -225,9 +240,8 @@ export class UI {
   bindToolbar() {
     for (const btn of document.querySelectorAll('.tool[data-tool]')) {
       btn.addEventListener('click', () => {
-        this.tool = btn.dataset.tool;
-        this.setPlacing(null);
-        document.querySelectorAll('.tool[data-tool]').forEach(b => b.classList.toggle('active', b === btn));
+        this.selectTool(this.tool === btn.dataset.tool && btn.dataset.tool !== 'pour' ? 'pour' : btn.dataset.tool);
+        if (this.tool === 'shape') this.toast('Shape', this.shapeHelp(), 'info', 'shape');
       });
     }
     $('surveyBtn').addEventListener('click', () => {
@@ -248,6 +262,13 @@ export class UI {
       if (st.sound) audio.unlock();
     });
     this.updateSurveyBtn();
+  }
+
+  selectTool(tool) {
+    this.tool = tool;
+    this.setPlacing(null);
+    this.r.canvas.classList.toggle('shaping', tool === 'shape');
+    document.querySelectorAll('.tool[data-tool]').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
   }
 
   updateSurveyBtn() {
@@ -293,14 +314,25 @@ export class UI {
       heatMap = g.toppleMap(this.table);
     }
     const gl = s.gleam && s.gleam.t === this.table ? s.gleam : null;
+    const digs = new Map();
+    for (const d of s.digs) {
+      if (d.done || d.t !== this.table) continue;
+      const i = g.digCell(d);
+      if (i >= 0) digs.set(i, d.prog / d.need);
+    }
+    const pv = this.updatePreview();
+    let suggest = this.placing === 'stone' ? this.suggest : -1;
+    const hl = this.highlight;
+    if (hl && hl.t === this.table && performance.now() < hl.until) suggest = hl.i;
     this.r.draw(b, dt, {
       heat: heatMap,
       hover: this.hover,
-      hoverBad: this.placing === 'stone' && this.hover >= 0 && !b.canPlaceStone(this.hover),
+      hoverBad: !!pv && !pv.ok,
       drag: this.drag,
       gleam: gl ? gl.cell : -1,
       gleamLife: gl ? gl.ttl / gl.max : 1,
-      suggest: this.placing === 'stone' ? this.suggest : -1,
+      suggest,
+      digs,
       fold: b.fold,
       active: true,
     });
@@ -316,6 +348,70 @@ export class UI {
       this.renderPanel(false);
       this.updateToolbar();
     }
+  }
+
+  // While placing or dragging, show what the move would do to dust income.
+  updatePreview() {
+    const g = this.g, b = this.board, i = this.hover;
+    let type = null, from = -1;
+    if (this.placing) type = this.placing;
+    else if (this.drag && this.drag.active && !this.drag.funnel) {
+      from = this.drag.from;
+      if (this.drag.hg > 0) type = 'hourglass';
+      else if (this.drag.kind === STONE) type = 'stone';
+    }
+    if (!type || i < 0 || i === from) {
+      if (this.placing) this.setHint(this.placeTip());
+      else if (this.drag && this.drag.active) this.setHint(this.drag.funnel ? 'Drop the funnel where sand from the table above should land.' : 'Drop it on another cell. Drop it off the table to pocket it.');
+      else this.setHint(null);
+      return null;
+    }
+    if (this.tool === 'shape') return null;
+    const pv = g.preview(type, this.table, i, from);
+    if (!pv) { this.setHint(null); return null; }
+    let text, cls = '';
+    if (!pv.ok) {
+      if (pv.trapped) text = 'A stone here would trap sand: it must always have a way out.';
+      else if (type === 'crystal') text = b.terr[i] === T_GEODE ? 'Something is already here.' : 'Crystals grow only on geodes.';
+      else text = 'Nothing can go there.';
+      cls = 'bad';
+    } else {
+      const pct = (pv.ratio - 1) * 100;
+      const verb = from >= 0 ? 'Moving here' : 'Here';
+      if (Math.abs(pct) < 0.05) text = `${verb}: no change to dust.`;
+      else {
+        text = `${verb}: ${pct > 0 ? '+' : '−'}${Math.abs(pct) < 10 ? Math.abs(pct).toFixed(1) : fmt(Math.abs(pct))}% dust/s`;
+        cls = pct > 0 ? 'good' : 'bad';
+      }
+      if (type === 'hourglass' && b.terr[i] === T_DIG) text += ' · digs fast';
+    }
+    this.setHint(text, cls);
+    return pv;
+  }
+
+  setHint(text, cls = '') {
+    const hint = $('placeHint');
+    if (!text) { if (!hint.classList.contains('hidden')) hint.classList.add('hidden'); return; }
+    if (hint.textContent !== text) hint.textContent = text;
+    hint.className = cls;
+  }
+
+  placeTip() {
+    const tips = {
+      hourglass: 'Click a cell to set an hourglass there. Hover to see what it would earn.',
+      crystal: 'Click a geode to grow a crystal on it.',
+      stone: 'Click a cell to set a stone. Sand bounces off it. Hover to see the effect.',
+      prism: 'Click a cell next to crystals. Each crystal it touches is doubled.',
+    };
+    return tips[this.placing] + ' (Esc to stop)';
+  }
+
+  shapeHelp() {
+    const g = this.g;
+    const parts = [];
+    if (g.fx.pick > 0) parts.push(`Click bedrock to break it (${Math.max(0, g.fx.pick - (g.s.broken[this.table] || 0))} left on this table this run).`);
+    if (g.fx.vane > 0) parts.push('Click a slope to turn it.');
+    return parts.join(' ') || 'Nothing to shape yet.';
   }
 
   updateHeader() {
@@ -365,6 +461,12 @@ export class UI {
     const fb = $('foldBtn');
     fb.classList.toggle('hidden', !g.has('fold'));
     fb.classList.toggle('active', !!s.fold);
+    const sb = $('shapeBtn');
+    const showS = g.has('shape');
+    sb.classList.toggle('hidden', !showS);
+    if (!showS && this.tool === 'shape') this.selectTool('pour');
+    const map = g.mapFor(this.table);
+    setText('tableName', map ? map.name : '');
     this.renderTableTabs();
     this.renderInventory();
   }
@@ -420,46 +522,61 @@ export class UI {
         },
       }, 'Suggest a spot'));
     }
-    const hint = $('placeHint');
-    if (this.placing) {
-      const tips = {
-        hourglass: 'Click a cell to set an hourglass there.',
-        crystal: 'Click a cell to grow a crystal. Bright cells topple most.',
-        stone: 'Click a cell to set a stone. Sand bounces off it — wall in your hourglasses, but leave a way out.',
-        prism: 'Click a cell next to crystals. Each crystal it touches is doubled.',
-      };
-      hint.textContent = tips[this.placing] + ' (Esc to stop)';
-      hint.classList.remove('hidden');
-    } else hint.classList.add('hidden');
   }
 
   updateCellInfo() {
     const el = $('cellInfo');
-    const g = this.g, b = this.board, i = this.hover;
+    const g = this.g, b = this.board, i = this.hover, t = this.table;
     let text;
     if (!this.clickedOnce) text = 'Click a cell to drop a grain of sand. Hold to pour.';
-    else if (i < 0) text = this.g.s.sweeps === 0 && this.g.s.owned.hourglass > 0 && !this._dragTipShown ? 'Tip: drag an hourglass to move it. Right-click (or Pick up) returns it to your pocket.' : ' ';
+    else if (i < 0) text = this.idleTip();
     else {
       const x = i % b.size, y = (i / b.size) | 0;
       const parts = [`(${x + 1}, ${y + 1})`];
-      if (b.kind[i] === STONE) parts.push('Stone');
-      else {
+      const tr = b.terr[i];
+      if (tr === T_BEDROCK) {
+        parts.push('Bedrock · sand bounces off it');
+        if (g.canShape(t, i) === 'break') parts.push('⛏ Shape can break it');
+      } else if (tr === T_CRACK && b.kind[i] !== STONE) {
+        parts.push('Crack · sand that falls in is lost');
+        if (g.has('stone')) parts.push('a stone would plug it');
+      } else if (b.kind[i] === STONE) {
+        parts.push(tr === T_CRACK ? 'Stone, plugging a crack' : 'Stone');
+      } else {
         const gr = Math.floor(b.grains[i]);
         parts.push(`${fmtInt(gr)} grain${gr === 1 ? '' : 's'}`);
         if (b.kind[i] === CRYSTAL) parts.push(`Crystal ${fmtMult(b.val[i])}`);
         else if (b.kind[i] === PRISM) parts.push('Prism');
+        else if (tr === T_GEODE) parts.push(g.has('crystal') ? `Geode · a crystal here ${fmtMult(g.crystalValueAt(b, i))}` : `Geode${b.rich[i] > 1.2 ? ' (rich)' : ''} · crystals will grow here`);
         else if (b.val[i] > 1) parts.push(`${fmtMult(b.val[i])}`);
+        if (tr === T_SPRING) parts.push(`Spring · pours ${fmt(g.springRate())} grains/s`);
+        if (tr === T_SLOPE) parts.push(`Slope · sand runs ${SLOPE_DIR[b.sdir[i]]}${g.canShape(t, i) === 'turn' ? ' (⛏ Shape turns it)' : ''}`);
+        if (tr === T_DIG) {
+          const d = g.digAt(t, i);
+          if (d) {
+            const r = g.digRate(d);
+            parts.push(`Dig site · ${Math.floor(100 * d.prog / d.need)}% dug` + (r > 0 ? ` · ~${fmtTime((d.need - d.prog) / r)} at this rate` : ' · pour sand here to dig'));
+          }
+        }
         if (b.hg[i] > 0) parts.push(`⧗ ${b.hg[i]} hourglass${b.hg[i] > 1 ? 'es' : ''}`);
         if (b.funnel === i) parts.push('Funnel');
-        const a = g.analyze().tables[this.table];
-        const u = g.toppleMap(this.table);
-        parts.push(`~${fmt(u[i])} topples/s`);
-        const pv = (a.v[i] + (a.X ? a.X[i] : 1) * a.down) * g.dustMultBase();
-        parts.push(`a grain here ≈ ${fmt(pv)} dust`);
+        if (tr !== T_DIG) {
+          const u = g.toppleMap(t);
+          parts.push(`~${fmt(u[i])} topples/s`);
+          parts.push(`a grain here ≈ ${fmt(g.grainValue(t, i) * g.dustMultBase())} dust`);
+        }
       }
       text = parts.join(' · ');
     }
     if (el.textContent !== text) el.textContent = text;
+  }
+
+  idleTip() {
+    const g = this.g, s = g.s;
+    if (this.tool === 'shape') return this.shapeHelp();
+    if (s.sweeps === 0 && s.owned.hourglass > 0 && !s.flags.movedStack) return 'Tip: drag your hourglasses to move the stack. Hover a cell first to see what a grain is worth there.';
+    if (s.sweeps === 0 && s.stats.digs === 0 && g.visibleDigs().length) return 'Tip: the marked cell is a dig site. Sand toppling on it digs — move your hourglasses onto it, or click it.';
+    return ' ';
   }
 
   floater(x, y, text, cls = '') {
@@ -522,6 +639,7 @@ export class UI {
       }
       case 'sweep':
         audio.sweep();
+        if (e.table) this.setTicker(`A new table: ${e.table}.`);
         if (!g.s.settings.reduceMotion && this.r.canvas.animate) {
           this.r.canvas.animate([{ opacity: 0, filter: 'blur(6px)', transform: 'scale(0.96)' }, { opacity: 1, filter: 'blur(0)', transform: 'scale(1)' }], { duration: 1100, easing: 'ease-out' });
         }
@@ -539,8 +657,59 @@ export class UI {
         audio.milestone();
         if (e.stage >= D.GREAT.length) this.showEnding();
         break;
-      case 'resize': this.structKey = ''; break;
+      case 'resize': {
+        this.structKey = '';
+        const found = [];
+        for (const k in e.found || {}) {
+          const n = e.found[k], nm = TERRAIN_FOUND[k];
+          if (!nm || +k === T_BEDROCK || +k === T_SLOPE || +k === T_CRACK) continue;
+          found.push(`${n} ${n === 1 ? nm[0] : nm[1]}`);
+        }
+        this.toast(`The table grows · ${e.size}×${e.size}`, found.length ? 'Uncovered: ' + found.join(', ') + '.' : 'Nothing new under this stretch of sand.', 'info', 'resize');
+        break;
+      }
+      case 'terrain': {
+        const tip = D.TERRAIN_TIPS[e.what];
+        if (!tip) break;
+        // let a new player drop their first grains before explaining the ground
+        if (!this.clickedOnce) (this.pendingTips = this.pendingTips || []).push(tip);
+        else this.toast('New · ' + tip[0], tip[1], 'glass');
+        break;
+      }
+      case 'relic':
+        audio.achievement();
+        this.tabDots.relics = this.tab !== 'relics';
+        this.structKey = '';
+        this.queueRelic(e.id, e.glass);
+        break;
+      case 'cache':
+        audio.gleamCatch();
+        this.toast('A buried cache', `+${fmt(e.amount)} dust, and a fragment of something older (+2% dust for good).`, 'gleam');
+        this.structKey = '';
+        break;
     }
+  }
+
+  queueRelic(id, glass) {
+    this.relicQueue = this.relicQueue || [];
+    this.relicQueue.push([id, glass]);
+    if ($('modal').classList.contains('hidden')) this.nextRelic();
+  }
+
+  nextRelic() {
+    if (!this.relicQueue || !this.relicQueue.length) return;
+    const [id, glass] = this.relicQueue.shift();
+    const r = D.RELIC_MAP[id];
+    const n = this.g.relicCount();
+    const content = h('div', { class: 'relic-reveal' },
+      h('div', { class: 'small muted' }, 'You dug something up'),
+      h('div', { class: 'relic-icon big' }, r.icon),
+      h('h2', {}, r.name),
+      h('p', { class: 'lore' }, r.lore),
+      h('p', { class: 'relic-fx' }, r.desc),
+      glass ? h('p', { class: 'small', style: 'color:var(--glass)' }, `Delve: +${fmt(glass)} glass.`) : null,
+      h('p', { class: 'small muted' }, `Relic ${n} of ${D.RELICS.length}. Relics are yours for good: they survive every sweep.`));
+    this.modal(content, [{ label: 'Keep it', cls: 'glassy' }]);
   }
 
   toast(title, text, kind = 'info', group = null) {
@@ -571,12 +740,16 @@ export class UI {
     $('modal').classList.remove('hidden');
   }
 
-  closeModal() { $('modal').classList.add('hidden'); }
+  closeModal() {
+    $('modal').classList.add('hidden');
+    if (this.relicQueue && this.relicQueue.length) setTimeout(() => this.nextRelic(), 250);
+  }
 
   // ---------------------------------------------------------------- panel
   tabs() {
     const g = this.g;
     const t = [['table', 'Table']];
+    if (g.relicCount() > 0 || g.s.seen.seen_dig) t.push(['relics', 'Relics']);
     if (g.kilnVisible()) t.push(['kiln', 'Kiln']);
     if (g.has('trials')) t.push(['trials', 'Trials']);
     if (g.has('great')) t.push(['great', 'Hourglass']);
@@ -590,8 +763,11 @@ export class UI {
     const kavail = D.KILN.filter(k => g.kilnAvailable(k)).map(k => k.id).join(',');
     return [this.tab, this.tabs().map(x => x[0]).join(','), avail, kavail, Object.keys(s.up).length, Object.keys(s.kiln).length,
       [...g.fx.unlocks].join(','), s.trial, Object.keys(s.trials).length, s.great, s.sweeps, g.boards.length, s.doctrine,
-      this.nextDoctrine, s.journal.length, g.achCount(), s.polish, g.has('doctrine'), s.ended].join('|');
+      this.nextDoctrine, s.journal.length, g.achCount(), s.polish, g.has('doctrine'), s.ended,
+      g.relicCount(), s.stats.digs, g.visibleDigs().length, g.geodeSlots(), this.boards0Size()].join('|');
   }
+
+  boards0Size() { return this.g.boards[0].size; }
 
   upgradeVisible(u) {
     const s = this.g.s;
@@ -628,7 +804,7 @@ export class UI {
     body.innerHTML = '';
     this.updaters = [];
     const fn = {
-      table: () => this.renderTable(body), kiln: () => this.renderKiln(body), trials: () => this.renderTrials(body),
+      table: () => this.renderTable(body), relics: () => this.renderRelics(body), kiln: () => this.renderKiln(body), trials: () => this.renderTrials(body),
       great: () => this.renderGreat(body), journal: () => this.renderJournal(body), records: () => this.renderRecords(body),
       options: () => this.renderOptions(body),
     }[this.tab];
@@ -653,6 +829,7 @@ export class UI {
         lbl.textContent = s.trials[s.trial] ? 'Complete! Sweep in the Kiln to return.' : `${fmt(s.dustRun)} / ${fmt(t.goal)} dust this run`;
       });
     }
+    this.renderDigs(body);
     body.appendChild(h('h3', {}, 'Buildings'));
     for (const type of ['hourglass', 'crystal', 'prism', 'stone']) {
       if (!g.buildingUnlocked(type)) continue;
@@ -673,6 +850,74 @@ export class UI {
     if (s.sweeps === 0 && !g.kilnVisible() && Object.keys(s.up).length >= 6) {
       body.appendChild(h('p', { class: 'note' }, 'Something behind the curtain is warming up. Keep going.'));
     }
+  }
+
+  renderDigs(body) {
+    const g = this.g, s = g.s;
+    const digs = g.visibleDigs();
+    const hidden = s.digs.filter(d => !d.done && g.digCell(d) < 0).length;
+    if (!digs.length && !hidden) return;
+    body.appendChild(h('h3', {}, 'Dig sites'));
+    if (!digs.length) {
+      body.appendChild(h('p', { class: 'note' }, `${hidden} more buried beyond the edge of the table. Widen it to reach ${hidden === 1 ? 'it' : 'them'}.`));
+      return;
+    }
+    const list = h('div', { class: 'digs' });
+    for (const d of digs) {
+      const bar = h('div', { class: 'progress' }, h('div'));
+      const lbl = h('span', { class: 'small muted' });
+      const row = h('button', {
+        class: 'dig-row', title: 'Show it on the table',
+        onclick: () => {
+          if (s.activeTable !== d.t) { s.activeTable = d.t; this._ttKey = ''; }
+          this.highlight = { t: d.t, i: g.digCell(d), until: performance.now() + 2500 };
+        },
+      }, h('span', { class: 'dig-name' }, `⛏ ${g.boards.length > 1 ? `Table ${ROMAN[d.t]} · ` : ''}${this.digLabel(d)}`), lbl, bar);
+      list.appendChild(row);
+      this.updaters.push(() => {
+        const r = g.digRate(d);
+        bar.firstChild.style.width = `${100 * Math.min(1, d.prog / d.need)}%`;
+        const t = `${Math.floor(100 * d.prog / d.need)}%` + (r > 0 ? ` · ~${fmtTime((d.need - d.prog) / r)}` : ' · no sand reaches it');
+        if (lbl.textContent !== t) lbl.textContent = t;
+      });
+    }
+    body.appendChild(list);
+    const tip = s.stats.digs === 0 ? 'Sand toppling on a site digs it. Move your hourglass stack onto it, or click it, to dig much faster.' : null;
+    if (hidden) body.appendChild(h('p', { class: 'note' }, `${hidden} more buried beyond the edge of the table.` + (tip ? ' ' + tip : '')));
+    else if (tip) body.appendChild(h('p', { class: 'note' }, tip));
+  }
+
+  digLabel(d) {
+    const dx = d.mx - 12, dy = d.my - 12;
+    if (!dx && !dy) return 'the centre';
+    const ns = dy < 0 ? 'north' : dy > 0 ? 'south' : '';
+    const ew = dx < 0 ? 'west' : dx > 0 ? 'east' : '';
+    const dir = Math.abs(dy) > 2 * Math.abs(dx) ? ns : Math.abs(dx) > 2 * Math.abs(dy) ? ew : ns + '-' + ew;
+    return `${d.ring <= 2 ? 'near' : d.ring <= 5 ? 'out' : 'far'} ${dir}`;
+  }
+
+  // ---- Relics tab
+  renderRelics(body) {
+    const g = this.g, s = g.s;
+    body.appendChild(h('h2', {}, 'Relics'));
+    body.appendChild(h('p', { class: 'note' }, 'Things buried under the sand. Each one is yours for good: relics survive every sweep. Every table hides a few; the further from the centre, the deeper they lie.'));
+    const grid = h('div', { class: 'relics' });
+    let unknown = 0;
+    for (const r of D.RELICS) {
+      if (!s.relics[r.id]) { unknown++; continue; }
+      grid.appendChild(h('div', { class: 'relic', title: r.lore }, h('div', { class: 'relic-icon' }, r.icon), h('div', {}, h('div', { class: 'rn' }, r.name), h('div', { class: 'rd' }, r.desc))));
+    }
+    body.appendChild(h('h3', {}, `Found (${g.relicCount()} / ${D.RELICS.length})`));
+    body.appendChild(grid);
+    if (unknown) {
+      const row = h('div', { class: 'relic-unknowns', title: 'Still buried somewhere.' });
+      for (let k = 0; k < unknown; k++) row.appendChild(h('span', {}, '?'));
+      body.appendChild(row);
+    }
+    if (s.fragments) body.appendChild(h('p', { class: 'note' }, `Fragments from buried caches: ${s.fragments} (+${2 * s.fragments}% dust).`));
+    const hidden = s.digs.filter(d => !d.done && g.digCell(d) < 0).length;
+    const open = g.visibleDigs().length;
+    body.appendChild(h('p', { class: 'note' }, `On this table: ${open} site${open === 1 ? '' : 's'} uncovered, ${hidden} still beyond the edge. A new table brings new sites.`));
   }
 
   buildingRow(type) {
@@ -697,12 +942,14 @@ export class UI {
     }
     this.updaters.push(() => {
       const n = s.owned[type];
-      countEl.textContent = type === 'stone' ? `${n} / ${g.stoneLimit()}` : (n ? `×${fmtInt(n)}` : '');
+      countEl.textContent = type === 'stone' ? `${n} / ${g.stoneLimit()}` : type === 'crystal' ? `${n} / ${g.geodeSlots()}` : (n ? `×${fmtInt(n)}` : '');
       const cost = g.costOf(type);
       const atLimit = n >= g.buildingLimit(type);
       buyBtn.disabled = atLimit || s.dust < cost;
       buyBtn.classList.toggle('hint', type === 'hourglass' && n === 0 && s.sweeps === 0 && s.dust >= cost);
-      buyBtn.innerHTML = atLimit ? 'Limit reached' : `Buy · <span class="cost">✦ ${fmt(cost)}</span>`;
+      const full = atLimit ? (type === 'crystal' ? 'Every geode has one' : 'Limit reached') : null;
+      const html = full || `Buy · <span class="cost">✦ ${fmt(cost)}</span>`;
+      if (buyBtn.innerHTML !== html) buyBtn.innerHTML = html;
       if (maxBtn) maxBtn.disabled = s.dust < cost;
       let d;
       if (type === 'hourglass') {
@@ -712,7 +959,7 @@ export class UI {
           const prev = D.HG_MILESTONES[g.milestoneCount() - 1] || 0;
           ms.firstChild.style.width = nm ? `${100 * (n - prev) / (nm - prev)}%` : '100%';
         }
-      } else if (type === 'crystal') d = `Topples on its cell give ${fmtMult(g.crystalBonus())} dust.`;
+      } else if (type === 'crystal') d = `Grows on a geode. Topples there give ${fmtMult(g.crystalBonus())} × the geode's richness.` + (n >= g.geodeSlots() ? ' Widen the table to find more geodes.' : '');
       else if (type === 'prism') d = `Each touching crystal ${fmtMult(g.prismFactor())}. Touch several!`;
       else d = def.desc;
       if (desc.textContent !== d) desc.textContent = d;
@@ -763,7 +1010,7 @@ export class UI {
     const prog = h('div', { class: 'progress' }, h('div'));
     const btn = h('button', { class: 'btn glassy big', onclick: () => this.confirmSweep() }, s.trial ? 'Sweep & end trial' : 'Sweep the table');
     card.append(h('div', { class: 'row' }, h('div', {}, gainEl, sub), btn), prog);
-    card.appendChild(h('p', { class: 'note' }, 'Sweeping clears the table: dust, hourglasses, buildings and upgrades are lost. Glass, kiln upgrades, achievements and your layout (as a blueprint) remain.'));
+    card.appendChild(h('p', { class: 'note' }, 'Sweeping clears the table: dust, hourglasses, buildings and upgrades are lost. Glass, kiln upgrades, relics and achievements remain — and you choose a new table to play on.'));
     body.appendChild(card);
     this.updaters.push(() => {
       const gain = g.glassGain();
@@ -844,29 +1091,54 @@ export class UI {
     return card;
   }
 
+  // The tables on offer for the next run, as clickable cards with a map of each.
+  tableChooser() {
+    const g = this.g;
+    const cands = g.candidates();
+    if (this.sweepChoice === undefined || this.sweepChoice >= cands.length) this.sweepChoice = 0;
+    const reveal = g.fx.compass ? 12 : Math.max(4, (g.startSize() >> 1) + 1);
+    const wrap = h('div', { class: 'choices' });
+    const cards = [];
+    cands.forEach((c, k) => {
+      const cv = h('canvas', { class: 'minimap' });
+      const map = g.candidateMap(k);
+      drawMinimap(cv, map, { size: 132, reveal, view: g.fx.compass ? 12 : reveal + 2, start: g.startSize() });
+      const card = h('button', {
+        class: 'choice' + (k === this.sweepChoice ? ' active' : ''),
+        onclick: () => { this.sweepChoice = k; cards.forEach((el, j) => el.classList.toggle('active', j === k)); },
+      }, cv, h('div', { class: 'c-name' }, c.name), h('div', { class: 'c-blurb' }, c.blurb),
+      h('div', { class: 'c-feat' }, (g.fx.compass ? '' : 'Rumoured: ') + describeFeatures(c.features)));
+      cards.push(card);
+      wrap.appendChild(card);
+    });
+    return h('div', {}, h('h3', {}, 'Choose the next table'), wrap,
+      g.fx.compass ? null : h('p', { class: 'small muted' }, 'Only the middle of each table is known until you play on it.'));
+  }
+
   confirmSweep() {
     const g = this.g, s = g.s;
     const gain = g.glassGain();
-    if (s.settings.confirmSweep === false && !s.trial) { this.doSweep(null); return; }
     const content = h('div', {},
       h('h2', {}, s.trial ? 'End the trial?' : 'Sweep the table?'),
       h('p', {}, gain > 0 ? `The kiln will give you ${fmt(gain)} glass.` : 'You will get no glass for this run.'),
-      h('ul', {}, h('li', {}, 'Lost: dust, hourglasses, crystals, stones, prisms and dust upgrades.'), h('li', {}, 'Kept: glass, kiln upgrades, achievements, trials, and your layout as a blueprint.')),
+      h('ul', {}, h('li', {}, 'Lost: dust, hourglasses, crystals, stones, prisms and dust upgrades.'), h('li', {}, 'Kept: glass, kiln upgrades, relics, achievements and trials.')),
+      this.tableChooser(),
       g.has('doctrine') ? h('p', { class: 'muted small' }, `Doctrine for the next run: ${D.DOCTRINES[this.nextDoctrine || s.doctrine || 'flow'].name} (change it in the Kiln tab).`) : null,
     );
     this.modal(content, [
       { label: 'Not yet' },
-      { label: s.trial ? 'End trial' : 'Sweep', cls: 'glassy', fn: () => this.doSweep(null) },
+      { label: s.trial ? 'End trial' : 'Sweep', cls: 'glassy', fn: () => this.doSweep(null, this.sweepChoice) },
     ]);
   }
 
-  doSweep(trial) {
+  doSweep(trial, choice = 0) {
     const g = this.g;
     const doc = this.nextDoctrine || g.s.doctrine || (g.has('doctrine') ? 'flow' : null);
-    if (trial) g.startTrial(trial); else g.sweep(doc);
+    if (trial) g.startTrial(trial, choice); else g.sweep(doc, null, choice);
     if (trial && doc && g.doctrineAvailable(doc)) g.s.doctrine = doc;
     g.recomputeFx();
     this.nextDoctrine = null;
+    this.sweepChoice = 0;
     this.seenUps.clear();
     this.hooks.save();
     this.renderPanel(true);
@@ -893,8 +1165,8 @@ export class UI {
         card.appendChild(h('button', {
           class: 'btn primary', onclick: () => {
             const gain = g.glassGain();
-            this.modal(h('div', {}, h('h2', {}, t.name), h('p', {}, t.rule), h('p', { class: 'muted' }, `This sweeps the table now${gain > 0 ? ` (+${fmt(gain)} glass)` : ''}.`)),
-              [{ label: 'Not yet' }, { label: 'Begin trial', cls: 'primary', fn: () => this.doSweep(t.id) }]);
+            this.modal(h('div', {}, h('h2', {}, t.name), h('p', {}, t.rule), h('p', { class: 'muted' }, `This sweeps the table now${gain > 0 ? ` (+${fmt(gain)} glass)` : ''}.`), this.tableChooser()),
+              [{ label: 'Not yet' }, { label: 'Begin trial', cls: 'primary', fn: () => this.doSweep(t.id, this.sweepChoice) }]);
           },
         }, 'Begin'));
       }
@@ -977,6 +1249,9 @@ export class UI {
       ['Dust this run / all time', () => `${fmt(s.dustRun)} / ${fmt(s.dustAll)}`],
       ['Glass made', () => fmt(s.glassAll)],
       ['Sweeps', () => fmtInt(s.sweeps)],
+      ['Tables played', () => fmtInt(s.tablesPlayed)],
+      ['Relics found', () => `${g.relicCount()} / ${D.RELICS.length}`],
+      ['Sites dug', () => fmtInt(st.digs)],
       ['Quakes', () => fmtInt(st.quakes)],
       ['Gleams caught', () => fmtInt(st.gleams)],
       ['Best linger (topples per grain)', () => g.bestLinger.toFixed(1)],
@@ -1014,9 +1289,8 @@ export class UI {
     toggle('Sound', () => st.sound, v => { st.sound = v; });
     const vol = h('input', { type: 'range', min: '0', max: '1', step: '0.05', value: String(st.volume ?? 0.5), oninput: (e) => { st.volume = +e.target.value; this.applySettings(); } });
     body.appendChild(h('div', { class: 'opt' }, h('span', {}, 'Volume'), vol));
-    toggle('Auto-place new hourglasses, crystals and prisms', () => st.autoPlace, v => { st.autoPlace = v; }, 'New buildings go to the best spot (or your blueprint). Stones always wait for you.');
+    toggle('Auto-place new crystals and prisms', () => st.autoPlace, v => { st.autoPlace = v; }, 'New crystals and prisms go to the best free spot. Hourglasses always join your biggest stack; stones always wait for you.');
     toggle('Particles', () => st.particles !== false, v => { st.particles = v; });
-    toggle('Confirm before sweeping', () => st.confirmSweep !== false, v => { st.confirmSweep = v; });
     toggle('Reduce motion', () => st.reduceMotion, v => { st.reduceMotion = v; });
     if (g.fx.auto.size) {
       body.appendChild(h('h3', {}, 'Automation'));
@@ -1039,7 +1313,8 @@ export class UI {
       }, 'Hard reset')));
     body.appendChild(h('h3', {}, 'How to play'));
     body.appendChild(h('div', { class: 'note' }, h('p', {}, 'Each cell holds up to three grains. A fourth makes it topple: one grain goes to each neighbour, and grains pushed off the edge are lost. Every topple earns dust.'),
-      h('p', {}, 'Click or hold to pour sand. Drag hourglasses and buildings to move them; drag them off the table (or right-click) to pocket them. Survey shows where sand is worth most.'),
+      h('p', {}, 'Click or hold to pour sand. Drag hourglasses and buildings to move them; drag them off the table (or right-click) to pocket them. While placing or dragging, the hint above the table tells you exactly what the move would earn.'),
+      h('p', {}, 'Every table has its own ground: geodes (crystals grow only there), dig sites (relics!), bedrock, springs, slopes and cracks. Hover a cell to learn about it.'),
       h('p', {}, 'Keys: Q quake · S survey · 1–3 switch table · Esc cancel.')));
     body.appendChild(h('p', { class: 'note small' }, 'Topple · an incremental game. Made with sand and JavaScript.'));
   }

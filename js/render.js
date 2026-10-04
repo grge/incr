@@ -1,5 +1,5 @@
 // Canvas renderer for a sand table.
-import { CRYSTAL, STONE, PRISM } from './sim.js';
+import { CRYSTAL, STONE, PRISM, T_GEODE, T_BEDROCK, T_SPRING, T_CRACK, T_DIG, T_SLOPE } from './sim.js';
 
 const PAL = [
   [36, 29, 23],    // 0 grains
@@ -122,6 +122,17 @@ export class Renderer {
     for (let i = 0; i < board.n; i++) {
       const x = i % s, y = (i / s) | 0;
       const px = pad + x * cell + gap / 2, py = pad + y * cell + gap / 2, w = cell - gap;
+      const tr = board.terr[i];
+      if (tr === T_BEDROCK) {
+        flash[i] = 0;
+        drawBedrock(ctx, px, py, w, i);
+        continue;
+      }
+      if (tr === T_CRACK) {
+        flash[i] = 0;
+        drawCrack(ctx, px, py, w, i, kind[i] === STONE);
+        continue;
+      }
       if (kind[i] === STONE) {
         flash[i] = 0;
         ctx.fillStyle = '#211c17';
@@ -161,6 +172,10 @@ export class Renderer {
         roundRect(ctx, px, py, w, w, Math.min(5, w * 0.18));
         ctx.fill();
       }
+      if (tr === T_GEODE && kind[i] !== CRYSTAL) drawGeode(ctx, px, py, w, board.rich[i], this.time, i);
+      else if (tr === T_SPRING) drawSpring(ctx, px, py, w, this.time);
+      else if (tr === T_SLOPE) drawSlope(ctx, px, py, w, board.sdir[i]);
+      else if (tr === T_DIG) drawDig(ctx, px, py, w, o.digs ? o.digs.get(i) : null, this.time);
     }
 
     // buildings
@@ -175,6 +190,21 @@ export class Renderer {
       else if (k === CRYSTAL) drawCrystal(ctx, cx, cy, cell, this.time, i);
       else if (k === PRISM) drawPrism(ctx, cx, cy, cell, this.time);
       if (hgN > 0) drawHourglass(ctx, cx, cy, cell, hgN, k !== 0, this.time);
+      // a stack digging: keep the dig's progress visible around it
+      if (hgN > 0 && o.digs && o.digs.has(i)) {
+        const p = Math.min(1, o.digs.get(i));
+        ctx.save();
+        ctx.lineWidth = Math.max(2, cell * 0.06);
+        ctx.strokeStyle = 'rgba(255,212,121,0.25)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, cell * 0.44, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,225,150,0.95)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, cell * 0.44, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * p);
+        ctx.stroke();
+        ctx.restore();
+      }
     }
 
     // funnel
@@ -418,4 +448,166 @@ function drawGleam(ctx, cx, cy, cell, t, life) {
   ctx.closePath();
   ctx.fill();
   ctx.restore();
+}
+
+function drawBedrock(ctx, px, py, w, seed) {
+  ctx.fillStyle = '#2b2622';
+  roundRect(ctx, px, py, w, w, Math.min(4, w * 0.12));
+  ctx.fill();
+  // a few facets
+  const r = (k) => ((Math.sin(seed * 12.9898 + k * 78.233) * 43758.5453) % 1 + 1) % 1;
+  ctx.fillStyle = '#3a332d';
+  ctx.beginPath();
+  ctx.moveTo(px + w * 0.1, py + w * (0.3 + r(1) * 0.3));
+  ctx.lineTo(px + w * (0.4 + r(2) * 0.2), py + w * 0.12);
+  ctx.lineTo(px + w * 0.9, py + w * (0.25 + r(3) * 0.3));
+  ctx.lineTo(px + w * (0.6 + r(4) * 0.2), py + w * 0.88);
+  ctx.lineTo(px + w * 0.2, py + w * 0.85);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+  ctx.lineWidth = Math.max(1, w * 0.04);
+  ctx.beginPath();
+  ctx.moveTo(px + w * (0.3 + r(5) * 0.3), py + w * 0.2);
+  ctx.lineTo(px + w * (0.45 + r(6) * 0.2), py + w * 0.6);
+  ctx.stroke();
+}
+
+function drawCrack(ctx, px, py, w, seed, plugged) {
+  ctx.fillStyle = '#0c0a09';
+  roundRect(ctx, px, py, w, w, Math.min(4, w * 0.12));
+  ctx.fill();
+  const r = (k) => ((Math.sin(seed * 7.13 + k * 3.7) * 9631.17) % 1 + 1) % 1;
+  ctx.strokeStyle = plugged ? 'rgba(120,110,100,0.5)' : 'rgba(90,70,50,0.9)';
+  ctx.lineWidth = Math.max(1, w * 0.05);
+  ctx.beginPath();
+  ctx.moveTo(px + w * 0.15, py + w * (0.2 + r(1) * 0.2));
+  ctx.lineTo(px + w * (0.4 + r(2) * 0.1), py + w * (0.45 + r(3) * 0.1));
+  ctx.lineTo(px + w * (0.55 + r(4) * 0.1), py + w * (0.4 + r(5) * 0.2));
+  ctx.lineTo(px + w * 0.85, py + w * (0.7 + r(6) * 0.15));
+  ctx.stroke();
+}
+
+function drawGeode(ctx, px, py, w, rich, t, seed) {
+  const a = Math.min(0.8, 0.3 + rich * 0.14);
+  ctx.save();
+  ctx.fillStyle = 'rgba(150,110,230,0.12)';
+  roundRect(ctx, px, py, w, w, Math.min(5, w * 0.18));
+  ctx.fill();
+  ctx.strokeStyle = `rgba(190,150,255,${a * 0.75})`;
+  ctx.lineWidth = Math.max(1, w * 0.035);
+  roundRect(ctx, px + w * 0.05, py + w * 0.05, w * 0.9, w * 0.9, Math.min(5, w * 0.16));
+  ctx.stroke();
+  // a little druse of amethyst shards in one corner: more and longer on richer geodes
+  const n = Math.max(2, Math.min(6, 1 + Math.round(rich * 1.3)));
+  const bx = px + w * 0.84, by = py + w * 0.86;
+  for (let k = 0; k < n; k++) {
+    const ang = -Math.PI + 0.2 + k * ((Math.PI / 2 - 0.4) / (n - 1));
+    const len = w * (0.2 + 0.035 * rich + 0.05 * (((seed * 7 + k * 5) % 3) / 2));
+    const wid = w * 0.055;
+    const tw = 0.5 + 0.5 * Math.sin(t * 2.1 + seed * 1.3 + k * 1.9);
+    ctx.fillStyle = `rgba(${(195 + 40 * tw) | 0},${(160 + 50 * tw) | 0},255,${0.6 + 0.3 * tw})`;
+    const dx = Math.cos(ang), dy = Math.sin(ang), nx = -dy, ny = dx;
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(bx + dx * len * 0.62 + nx * wid, by + dy * len * 0.62 + ny * wid);
+    ctx.lineTo(bx + dx * len, by + dy * len);
+    ctx.lineTo(bx + dx * len * 0.62 - nx * wid, by + dy * len * 0.62 - ny * wid);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawSpring(ctx, px, py, w, t) {
+  const cx = px + w / 2, cy = py + w / 2;
+  ctx.save();
+  for (let k = 0; k < 2; k++) {
+    const ph = (t * 0.8 + k * 0.5) % 1;
+    ctx.strokeStyle = `rgba(120,200,255,${0.75 * (1 - ph)})`;
+    ctx.lineWidth = Math.max(1, w * 0.05);
+    ctx.beginPath();
+    ctx.arc(cx, cy, w * (0.12 + 0.32 * ph), 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(150,215,255,0.9)';
+  ctx.beginPath();
+  ctx.arc(cx, cy, Math.max(1.5, w * 0.09), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawSlope(ctx, px, py, w, dir) {
+  const cx = px + w / 2, cy = py + w / 2;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(dir * Math.PI / 2);
+  ctx.strokeStyle = 'rgba(40,25,10,0.45)';
+  ctx.lineWidth = Math.max(1.2, w * 0.08);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (const off of [-0.12, 0.12]) {
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.2, (off + 0.08) * w);
+    ctx.lineTo(0, (off - 0.08) * w);
+    ctx.lineTo(w * 0.2, (off + 0.08) * w);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawDig(ctx, px, py, w, prog, t) {
+  const cx = px + w / 2, cy = py + w / 2;
+  ctx.save();
+  ctx.strokeStyle = `rgba(255,212,121,${0.55 + 0.25 * Math.sin(t * 3)})`;
+  ctx.lineWidth = Math.max(1, w * 0.05);
+  ctx.setLineDash([Math.max(2, w * 0.12), Math.max(2, w * 0.08)]);
+  roundRect(ctx, px + w * 0.08, py + w * 0.08, w * 0.84, w * 0.84, Math.min(5, w * 0.16));
+  ctx.stroke();
+  ctx.setLineDash([]);
+  if (prog !== null && prog !== undefined) {
+    ctx.strokeStyle = 'rgba(255,225,150,0.95)';
+    ctx.lineWidth = Math.max(1.5, w * 0.09);
+    ctx.beginPath();
+    ctx.arc(cx, cy, w * 0.3, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, prog));
+    ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(255,230,170,0.95)';
+  ctx.font = `600 ${Math.max(8, w * 0.32)}px Inter, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('?', cx, cy + w * 0.02);
+  ctx.restore();
+}
+
+// Small overview of a whole table map (for choosing the next table).
+const MINI = { 0: '#5b4430', 1: '#a88be0', 2: '#2b2622', 3: '#6fc0ef', 4: '#0c0a09', 5: '#ffd479', 6: '#8a6a44' };
+export function drawMinimap(canvas, map, opts = {}) {
+  const MAPN = 25, C = 12;
+  const css = opts.size || 150;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width = css * dpr;
+  canvas.height = css * dpr;
+  canvas.style.width = css + 'px';
+  canvas.style.height = css + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#16120e';
+  ctx.fillRect(0, 0, css, css);
+  const reveal = opts.reveal ?? 12;
+  const view = Math.min(C, opts.view ?? C);   // how many rings around the centre to draw
+  const o = C - view, N = 2 * view + 1;
+  const cell = css / N;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const i = (y + o) * MAPN + (x + o);
+    const ring = Math.max(Math.abs(x + o - C), Math.abs(y + o - C));
+    const hidden = ring > reveal;
+    ctx.fillStyle = hidden ? '#221c16' : MINI[map.terr[i]];
+    ctx.fillRect(x * cell + 0.5, y * cell + 0.5, cell - 1, cell - 1);
+  }
+  // the starting window
+  const st = (opts.start || 5) >> 1;
+  ctx.strokeStyle = 'rgba(255,240,210,0.5)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect((view - st) * cell, (view - st) * cell, (st * 2 + 1) * cell, (st * 2 + 1) * cell);
 }

@@ -13,8 +13,8 @@ for (const id in targets.upgrades || {}) items.push({ kind: 'upgrades', id, targ
 for (const id in targets.kiln || {}) items.push({ kind: 'kiln', id, target: targets.kiln[id] });
 for (const id in targets.great || {}) items.push({ kind: 'great', id, target: targets.great[id] });
 const trialIds = Object.keys(targets.trials || {});
-// trials are attempted after k_trials, roughly every other sweep
-trialIds.forEach((id, k) => items.push({ kind: 'trials', id, target: (targets.kiln?.k_trials || 0) + 400 + k * 900, runTarget: targets.trials[id] }));
+// trials are attempted once unlocked, roughly every other sweep
+trialIds.forEach((id, k) => items.push({ kind: 'trials', id, target: (targets.trialStart || 3600) + k * (targets.trialSpacing || 900), runTarget: targets.trials[id] }));
 items.sort((a, b) => a.target - b.target);
 
 const ov = { upgrades: {}, kiln: {}, trials: {}, great: {} };
@@ -58,9 +58,12 @@ for (let idx = 0; idx < items.length; idx++) {
   }
   const tgt = it.kind === 'trials' ? it.runTarget : it.target;
   let logC = Math.log(startCost(it));
-  const pts = [];
   let best = null;
-  for (let attempt = 0; attempt < 8; attempt++) {
+  // bracket the target: lo = a cost reached too early, hi = one reached too late (or never)
+  let lo = null, hi = null;
+  const MAXSTEP = Math.log(1e4);
+  const clamp = (x) => Math.max(-MAXSTEP, Math.min(MAXSTEP, x));
+  for (let attempt = 0; attempt < 9; attempt++) {
     setCost(it, Math.exp(logC));
     applyOverrides(ov);
     const horizon = it.kind === 'trials' ? it.target + 3600 : it.target + 1500;
@@ -70,14 +73,14 @@ for (let idx = 0; idx < items.length; idx++) {
     if (!best || Math.abs(err) < Math.abs(best.err)) best = { logC, err, got };
     console.log(`${String(idx).padStart(2)} ${it.id.padEnd(14)} try ${attempt} cost ${Math.exp(logC).toExponential(2)} got ${got ?? '-'} tgt ${tgt}`);
     if (got !== undefined && Math.abs(got - tgt) <= Math.max(60, 0.015 * tgt)) break;
-    if (got === undefined) { logC -= Math.log(it.kind === 'trials' ? 100 : 6); pts.length = 0; continue; }
-    pts.push([logC, err]);
-    if (pts.length >= 2) {
-      const [a, b] = pts.slice(-2);
-      const slope = (b[1] - a[1]) / (b[0] - a[0]);
-      if (slope > 1e-3 && Number.isFinite(slope)) { logC = b[0] - b[1] / slope; continue; }
-    }
-    logC -= err / (it.kind === 'trials' ? 0.06 : 0.1);
+    if (err < 0 && (!lo || logC > lo.logC)) lo = { logC, err };
+    if (err > 0 && (!hi || logC < hi.logC)) hi = { logC, err };
+    if (lo && hi) {
+      // interpolate when both ends were measured, else bisect
+      const t = Number.isFinite(hi.err) ? -lo.err / (hi.err - lo.err) : 0.5;
+      logC = lo.logC + Math.max(0.2, Math.min(0.8, t)) * (hi.logC - lo.logC);
+    } else if (got === undefined) logC -= Math.log(it.kind === 'trials' ? 30 : 6);
+    else logC += clamp(-err / (it.kind === 'trials' ? 0.06 : 0.1));
   }
   setCost(it, Math.exp(best.logC));
   save();

@@ -1,16 +1,17 @@
 // Entry point: wires the game, renderer and UI together and runs the loop.
-import { Game } from './game.js';
+import { Game, SAVE_VERSION } from './game.js';
 import { Renderer } from './render.js';
 import { UI } from './ui.js';
 import { fmt, fmtTime } from './format.js';
 
-const SAVE_KEY = 'topple.save.v1';
+const SAVE_KEY = 'topple.save.v2';
+const OLD_KEY = 'topple.save.v1';
 
 function encode(str) { return btoa(unescape(encodeURIComponent(str))); }
 function decode(b64) { return decodeURIComponent(escape(atob(b64))); }
 
-function readSave() {
-  try { return localStorage.getItem(SAVE_KEY); } catch (e) { return null; }
+function readSave(key = SAVE_KEY) {
+  try { return localStorage.getItem(key); } catch (e) { return null; }
 }
 
 function writeSave(game) {
@@ -22,18 +23,24 @@ function writeSave(game) {
   }
 }
 
-const game = new Game();
+let game = new Game();
 let offlineReport = null;
+let oldSave = false;
 const raw = readSave();
 if (raw) {
   try {
     const data = JSON.parse(raw);
-    game.load(data);
-    const away = (Date.now() - (data.lastSave || Date.now())) / 1000;
-    if (away > 30) offlineReport = game.offline(Math.min(away, 7 * 86400));
+    if (game.load(data)) {
+      const away = (Date.now() - (data.lastSave || Date.now())) / 1000;
+      if (away > 30) offlineReport = game.offline(Math.min(away, 7 * 86400));
+    } else game = new Game();
   } catch (e) {
     console.error('Could not load save', e);
+    game = new Game();
   }
+} else if (readSave(OLD_KEY)) {
+  // a save from the first version of the game: the tables have changed too much to carry it over
+  oldSave = !readSave('topple.v2.noticed');
 }
 
 const renderer = new Renderer(document.getElementById('board'));
@@ -43,7 +50,12 @@ const ui = new UI(game, renderer, {
   importSave: (text) => {
     try {
       const json = text.trim().startsWith('{') ? text.trim() : decode(text.trim());
-      JSON.parse(json);
+      const o = JSON.parse(json);
+      if (!o || o.v !== SAVE_VERSION) {
+        ui.toast('Import failed', 'That save is from an older version of Topple, which works too differently to carry over.', 'warn');
+        return;
+      }
+      resetting = true;
       localStorage.setItem(SAVE_KEY, json);
       location.reload();
     } catch (e) {
@@ -64,8 +76,15 @@ if (offlineReport && offlineReport.dust > 0) {
   el.innerHTML = `<h2>While you were away</h2>
     <p>${fmtTime(offlineReport.sec)} passed. Your hourglasses kept pouring.</p>
     <p style="font-size:20px;color:var(--sand)">+${fmt(offlineReport.dust)} dust</p>
-    ${offlineReport.sand > 0 ? `<p style="color:var(--gold)">+${fmt(offlineReport.sand)} sand</p>` : ''}`;
+    ${offlineReport.sand > 0 ? `<p style="color:var(--gold)">+${fmt(offlineReport.sand)} sand</p>` : ''}
+    ${offlineReport.relics > 0 ? `<p style="color:var(--gold)">and ${offlineReport.relics === 1 ? 'a relic' : offlineReport.relics + ' relics'}, dug up while you slept</p>` : ''}`;
   ui.modal(el, [{ label: 'Welcome back', cls: 'primary' }]);
+} else if (oldSave) {
+  const el = document.createElement('div');
+  el.innerHTML = `<h2>The tables have changed</h2>
+    <p>Topple has been rebuilt: every table now has its own ground — geodes, bedrock, springs, slopes, cracks — and things are buried under the sand.</p>
+    <p>Your old save works too differently to carry over, so this is a fresh start. Thank you for playing the first version.</p>`;
+  ui.modal(el, [{ label: 'Begin', cls: 'primary', fn: () => { try { localStorage.setItem('topple.v2.noticed', '1'); } catch (e) { /* ignore */ } } }]);
 }
 
 // ------------------------------------------------------------------ loop
@@ -102,7 +121,7 @@ setInterval(() => {
 }, 1000);
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) writeSave(game);
+  if (document.hidden && !resetting) writeSave(game);
 });
 window.addEventListener('beforeunload', () => { if (!resetting) writeSave(game); });
 

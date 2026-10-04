@@ -31,23 +31,23 @@ for (const id of korder) {
   let c = nice(cal.kiln[id]);
   if (c < prev * 1.1) c = nice(prev * 1.15);
   prev = c;
-  const re = new RegExp(`(\\{ id: '${id}', name: '[^']*', cost: )[0-9.e+]+`);
+  const re = new RegExp(`(\\{ id: '${id}', name: '(?:[^'\\\\]|\\\\.)*', cost: )[0-9.e+]+`);
   if (!re.test(src)) throw new Error('kiln ' + id);
   src = src.replace(re, `$1${lit(c)}`);
 }
 for (const id in cal.upgrades) {
-  const re = new RegExp(`(\\{ id: '${id}', name: '[^']*', cost: )[0-9.e+]+`);
+  const re = new RegExp(`(\\{ id: '${id}', name: '(?:[^'\\\\]|\\\\.)*', cost: )[0-9.e+]+`);
   if (!re.test(src)) throw new Error('upgrade ' + id);
   src = src.replace(re, `$1${lit(nice(cal.upgrades[id]))}`);
 }
 for (const id in cal.trials) {
-  const re = new RegExp(`(\\{ id: '${id}', name: '[^']*', goal: )[0-9.e+]+`);
+  const re = new RegExp(`(\\{ id: '${id}', name: '(?:[^'\\\\]|\\\\.)*', goal: )[0-9.e+]+`);
   if (!re.test(src)) throw new Error('trial ' + id);
   src = src.replace(re, `$1${lit(nice(cal.trials[id]))}`);
 }
 for (const id in cal.great) {
   const g = cal.great[id];
-  const re = new RegExp(`(\\{ id: '${id}', name: '[^']*', glass: )[0-9.e+]+(, sand: )[0-9.e+]+`);
+  const re = new RegExp(`(\\{ id: '${id}', name: '(?:[^'\\\\]|\\\\.)*', glass: )[0-9.e+]+(, sand: )[0-9.e+]+`);
   if (!re.test(src)) throw new Error('great ' + id);
   src = src.replace(re, `$1${lit(nice(g.glass))}$2${lit(nice(g.sand))}`);
 }
