@@ -1,25 +1,22 @@
 name: Deploy to GitHub Pages
 
+# Publishes the static game to the gh-pages branch on every push.
+# (Settings → Pages → Source: "Deploy from a branch", branch gh-pages, folder /.)
 on:
   push:
     branches: [main, claude/wonderful-knuth-qoatob]
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  publish:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -27,19 +24,17 @@ jobs:
         run: |
           node -e "import('./js/game.js').then(m => { const g = new m.Game({ analytic: true }); g.tick(1); console.log('ok'); })"
 
-      - name: Assemble site
+      - name: Publish to gh-pages
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p _site
           cp -r index.html css js _site/
           touch _site/.nojekyll
-
-      - uses: actions/configure-pages@v5
-        with:
-          enablement: true
-
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: _site
-
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          cd _site
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Deploy ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
