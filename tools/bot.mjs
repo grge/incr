@@ -237,6 +237,8 @@ export function simulate({ hours = 5, profile = 'active', verbose = false, noSwe
     g.tick(1);
     t += 1;
     for (const d of open) if (d.done) digTimes.push({ t, len: t - digSeen.get(d), ring: d.ring, tier: g.s.tableDefs[d.t]?.tier });
+    // upgrades bought by automation (the Journeyman) count too
+    for (const id in g.s.up) if (!(id in purchases)) { purchases[id] = t; isNew('upgrade ' + id); }
     for (const e of g.drainEvents()) {
       if (e.type === 'trialDone') { trialsDone[e.id] = { t, runT: t - trialStart }; isNew('trial ' + e.id); note(`TRIAL DONE ${e.id} after ${fmtTime(t - trialStart)}`); }
       if (e.type === 'relic') { relics[e.id] = t; isNew('relic ' + e.id); const dt = digTimes[digTimes.length - 1]; note(`RELIC ${D.RELIC_MAP[e.id].name} (${g.relicCount()}/${D.RELICS.length})${e.glass ? ' +' + fmt(e.glass) + ' glass' : ''}${dt && dt.t === t ? ` dug in ${fmtTime(dt.len)} (ring ${dt.ring})` : ''}`); }
