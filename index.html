@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Topple</title>
+  <meta name="description" content="Topple — an incremental game about sand, avalanches and patience.">
+  <meta name="theme-color" content="#16120e">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2316120e'/%3E%3Cpath d='M9 6h14l-7 10zM9 26h14l-7-10z' fill='%23e3b26c'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="top">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">⧗</span>
+        <h1>Topple</h1>
+      </div>
+      <div class="currencies">
+        <div class="cur dust" title="Dust: earned every time a cell topples.">
+          <span class="cur-icon">✦</span>
+          <span class="cur-val" id="dust">0</span>
+          <span class="cur-label">dust</span>
+          <span class="cur-rate" id="dustRate"></span>
+        </div>
+        <div class="cur glass hidden" id="glassBox" title="Glass: made in the kiln when you sweep the table.">
+          <span class="cur-icon">◇</span>
+          <span class="cur-val" id="glass">0</span>
+          <span class="cur-label">glass</span>
+        </div>
+        <div class="cur sand hidden" id="sandBox" title="Sand: grains that fall from your last table into the Great Hourglass.">
+          <span class="cur-icon">⁂</span>
+          <span class="cur-val" id="sand">0</span>
+          <span class="cur-label">sand</span>
+          <span class="cur-rate" id="sandRate"></span>
+        </div>
+      </div>
+      <div class="top-actions">
+        <div id="buffs"></div>
+        <button id="muteBtn" class="icon-btn" title="Sound on/off" aria-label="Toggle sound">♪</button>
+      </div>
+    </header>
+
+    <main id="main">
+      <section id="stage">
+        <div id="tableTabs" class="hidden"></div>
+        <div id="boardWrap">
+          <canvas id="board" aria-label="The sand table. Click a cell to drop sand."></canvas>
+          <div id="placeHint" class="hidden"></div>
+        </div>
+        <div id="toolbar">
+          <div class="tool-group">
+            <button class="tool active" data-tool="pour" title="Click or hold a cell to drop sand. Drag hourglasses and buildings to move them.">✋ Pour</button>
+            <button class="tool" data-tool="remove" title="Click a building to put it back in your pocket.">⤺ Pick up</button>
+            <button class="tool" id="surveyBtn" title="Survey the table: where is sand worth the most?">◎ Survey</button>
+          </div>
+          <div class="tool-group">
+            <button id="quakeBtn" class="quake hidden" title="Shake the table.">
+              <span class="quake-fill"></span><span class="quake-label">≋ Quake</span>
+            </button>
+            <button id="foldBtn" class="tool hidden" title="Fold the table: its east and west edges meet.">⇄ Fold</button>
+          </div>
+        </div>
+        <div id="inventory" class="hidden"></div>
+        <div id="cellInfo">&nbsp;</div>
+        <div id="ticker"></div>
+      </section>
+
+      <section id="panel">
+        <nav id="tabs" role="tablist"></nav>
+        <div id="tabBody"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toasts" aria-live="polite"></div>
+  <div id="modal" class="hidden" role="dialog" aria-modal="true"><div class="modal-card" id="modalCard"></div></div>
+  <canvas id="fx" aria-hidden="true"></canvas>
+
+  <noscript><p style="padding:2em;color:#ddd">Topple needs JavaScript to run.</p></noscript>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

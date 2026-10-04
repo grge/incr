@@ -1,0 +1,20 @@
+{
+ "hours": 5.2,
+ "profile": "active",
+ "out": "tools/scratch/calibrated.json",
+ "kiln": {
+  "k_warm": 1500, "k_glasshg": 1500, "k_memory": 2100, "k_stones": 2700, "k_lens": 3100,
+  "k_apprentice": 3500, "k_seismic": 3900, "k_long": 4300, "k_doctrines": 4800, "k_blow": 5200,
+  "k_cairn": 5600, "k_fold": 6000, "k_journeyman": 6400, "k_prisms": 6900, "k_deep": 7300,
+  "k_trials": 7800, "k_artisan": 8300, "k_seismograph": 8800, "k_vast": 9300, "k_tremor": 9800,
+  "k_kiln2": 10300, "k_quarry": 10800, "k_cascade": 11400, "k_horizon": 12000, "k_cascade2": 12600,
+  "k_furnace": 13200, "k_great": 13900
+ },
+ "upgrades": {
+  "u_aftershock": 4100, "u_t15": 4600, "u_temper": 5000, "u_lustre": 5400, "u_t17": 5900, "u_silt": 6300,
+  "u_marquise": 7200, "u_refract": 8000, "u_t19": 9500, "u_loess": 10100, "u_t21": 10700, "u_powder": 11300,
+  "u_t23": 12300, "u_rose": 12900, "u_t25": 13500, "u_starlight": 14100
+ },
+ "trials": { "t_narrow": 480, "t_still": 480, "t_wind": 480, "t_scatter": 480, "t_crumble": 480, "t_glassless": 480 },
+ "great": { "g_frame": 14200, "g_lower": 14700, "g_neck": 15300, "g_upper": 15900, "g_fill": 16500 }
+}

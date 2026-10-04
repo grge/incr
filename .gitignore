@@ -1,0 +1,4 @@
+node_modules/
+tools/scratch/
+*.cpuprofile
+.DS_Store
