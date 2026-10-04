@@ -20,9 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check the game logic loads
-        run: |
-          node -e "import('./js/game.js').then(m => { const g = new m.Game({ analytic: true }); g.tick(1); console.log('ok'); })"
+      - name: Test the game logic
+        run: node tools/test.mjs
 
       - name: Publish to gh-pages
         env:

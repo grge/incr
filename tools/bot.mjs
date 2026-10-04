@@ -48,6 +48,7 @@ export function simulate({ hours = 5, profile = 'active', verbose = false, noSwe
   let peakRate = 0, runStartT = 0, lastReport = 0, endedAt = null, trialStart = 0;
   let sinceTrial = 0;
   let noStoneUntil = 0;
+  const deferred = {};
   const seen = new Set();
   const totalT = hours * 3600;
 
@@ -161,8 +162,8 @@ export function simulate({ hours = 5, profile = 'active', verbose = false, noSwe
     const runT = t - runStartT;
     const gain = g.glassGain();
     if (g.s.trial) {
-      if (g.s.trials[g.s.trial] || runT > 1500) {
-        if (!g.s.trials[g.s.trial]) note(`  trial ${g.s.trial} FAILED (${fmt(g.s.dustRun)} / ${fmt(D.TRIAL_MAP[g.s.trial].goal)})`);
+      if (g.s.trials[g.s.trial] || runT > 1200) {
+        if (!g.s.trials[g.s.trial]) { deferred[g.s.trial] = 3; note(`  trial ${g.s.trial} FAILED (${fmt(g.s.dustRun)} / ${fmt(D.TRIAL_MAP[g.s.trial].goal)})`); }
         doSweep(null);
       }
     } else if (gain >= 1 && !noSweep) {
@@ -174,7 +175,10 @@ export function simulate({ hours = 5, profile = 'active', verbose = false, noSwe
       if ((enough && rate < peakRate * 0.9 && runT > 120) || runT > 2400) {
         let trial = null;
         if (g.has('trials') && sinceTrial >= 1) {
-          const open = D.TRIALS.filter(tr => !g.s.trials[tr.id] && Number.isFinite(tr.goal));
+          // easiest-looking open trial that has not failed recently
+          const open = D.TRIALS.filter(tr => !g.s.trials[tr.id] && Number.isFinite(tr.goal) && !(deferred[tr.id] > 0))
+            .sort((a, b) => a.goal - b.goal);
+          for (const id in deferred) deferred[id]--;
           if (open.length) trial = open[0].id;
         }
         doSweep(trial);

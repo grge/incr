@@ -69,7 +69,7 @@ for (let idx = 0; idx < items.length; idx++) {
     const err = got === undefined ? Infinity : Math.log((got + 60) / (tgt + 60));
     if (!best || Math.abs(err) < Math.abs(best.err)) best = { logC, err, got };
     console.log(`${String(idx).padStart(2)} ${it.id.padEnd(14)} try ${attempt} cost ${Math.exp(logC).toExponential(2)} got ${got ?? '-'} tgt ${tgt}`);
-    if (Math.abs(err) < 0.05) break;
+    if (got !== undefined && Math.abs(got - tgt) <= Math.max(60, 0.015 * tgt)) break;
     if (got === undefined) { logC -= Math.log(it.kind === 'trials' ? 100 : 6); pts.length = 0; continue; }
     pts.push([logC, err]);
     if (pts.length >= 2) {

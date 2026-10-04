@@ -602,7 +602,12 @@ export class UI {
   }
 
   renderPanel(force) {
-    const key = this.structureKey();
+    const g = this.g;
+    const kAfford = g.kilnVisible() && (D.KILN.some(k => g.kilnAvailable(k) && g.s.glass >= k.cost) || (g.glassGain() >= 1 && g.s.sweeps === 0));
+    if (this.tab !== 'kiln') this.tabDots.kiln = kAfford;
+    const gAfford = g.has('great') && g.canBuildGreat();
+    if (this.tab !== 'great') this.tabDots.great = gAfford;
+    const key = this.structureKey() + '|' + kAfford + gAfford;
     if (!force && key === this.structKey) {
       for (const f of this.updaters) f();
       return;
@@ -964,6 +969,8 @@ export class UI {
       ['Time played', () => fmtTime(st.played)],
       ['This run', () => fmtTime(st.runTime)],
       ['Total topples', () => fmt(st.topples)],
+      ['Sand poured', () => `${fmt(g.analyze().grainRate * (s.buffs.sandstorm > 0 ? 10 : 1))} grains/s`],
+      ['Topples per grain (average)', () => { const a = g.analyze(); return a.grainRate > 0 ? (a.topples / a.grainRate).toFixed(1) : '—'; }],
       ['Largest wave', () => `${fmtInt(st.maxWave)} cells at once`],
       ['Grains dropped by hand', () => fmt(st.handGrains)],
       ['Dust this run / all time', () => `${fmt(s.dustRun)} / ${fmt(s.dustAll)}`],
@@ -1022,7 +1029,7 @@ export class UI {
     body.appendChild(ta);
     body.appendChild(h('div', { class: 'btn-row' },
       h('button', { class: 'btn', onclick: () => { this.hooks.save(); this.toast('', 'Saved.', 'info'); } }, 'Save now'),
-      h('button', { class: 'btn', onclick: () => { ta.value = this.hooks.exportSave(); ta.select(); try { navigator.clipboard.writeText(ta.value); this.toast('', 'Save copied to clipboard.', 'info'); } catch (e) { /* ignore */ } } }, 'Export'),
+      h('button', { class: 'btn', onclick: () => { ta.value = this.hooks.exportSave(); ta.select(); try { navigator.clipboard.writeText(ta.value).then(() => this.toast('', 'Save copied to clipboard.', 'info'), () => {}); } catch (e) { /* no clipboard */ } } }, 'Export'),
       h('button', { class: 'btn', onclick: () => { if (ta.value.trim()) this.hooks.importSave(ta.value.trim()); } }, 'Import'),
       h('button', {
         class: 'btn', style: 'margin-left:auto;color:var(--warn)', onclick: () => this.modal(h('div', {}, h('h2', {}, 'Erase everything?'), h('p', {}, 'This deletes your save completely. There is no undo.')),

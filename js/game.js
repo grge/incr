@@ -554,10 +554,17 @@ export class Game {
     return null;
   }
 
+  // The blueprint restores your previous layout after a sweep, until you
+  // start rearranging things by hand.
+  forgetBlueprint() {
+    if (this.s.blueprint.length) this.s.blueprint = [];
+  }
+
   place(type, t, i, auto = false) {
     const b = this.boards[t];
     if (!b || i < 0 || i >= b.n) return false;
     if (this.s.inv[type] <= 0) return false;
+    if (!auto) this.forgetBlueprint();
     if (type === 'hourglass') {
       if (b.kind[i] === STONE) return false;
       b.hg[i]++;
@@ -589,6 +596,7 @@ export class Game {
   removeAt(t, i, wholeStack = false) {
     const b = this.boards[t];
     if (!b) return false;
+    this.forgetBlueprint();
     if (b.hg[i] > 0) {
       const k = wholeStack ? b.hg[i] : 1;
       b.hg[i] -= k;
@@ -611,6 +619,7 @@ export class Game {
   move(t, from, to) {
     const b = this.boards[t];
     if (!b || from === to) return false;
+    this.forgetBlueprint();
     if (b.hg[from] > 0) {
       if (b.kind[to] === STONE) return false;
       b.hg[to] += b.hg[from];
@@ -693,8 +702,82 @@ export class Game {
     const u = D.UPGRADE_MAP[id];
     this.s.up[id] = 1;
     this.recomputeFx();
-    if (u.fx.size) this.resizeTables(this.maxSize());
+    if (u.fx.size) {
+      this.resizeTables(this.maxSize());
+      this.reapplyBlueprint();
+    }
     this.layoutChanged();
+  }
+
+  // After the table grows, parts of the blueprint that did not fit before may
+  // fit now. While the layout is still fully automatic (nothing moved by hand
+  // this run), move things into those newly reachable blueprint slots, taking
+  // them from the pocket first and then from positions the blueprint does not
+  // mention.
+  reapplyBlueprint() {
+    const bp = this.s.blueprint;
+    if (!bp.length) return;
+    const s = this.s;
+    const cellOf = (e) => {
+      const b = this.boards[e.t];
+      if (!b) return -1;
+      const c = b.size >> 1, x = c + e.dx, y = c + e.dy;
+      return x < 0 || y < 0 || x >= b.size || y >= b.size ? -1 : b.idx(x, y);
+    };
+    let changed = false;
+    for (const type of ['stone', 'crystal', 'prism']) {
+      const kind = D.BUILDINGS[type].kind;
+      const entries = bp.filter(e => e.type === type);
+      const wanted = new Set(entries.map(e => e.t + ':' + cellOf(e)));
+      // positions of this kind that the blueprint does not ask for
+      const pool = [];
+      this.boards.forEach((b, t) => { for (let i = 0; i < b.n; i++) if (b.kind[i] === kind && !wanted.has(t + ':' + i)) pool.push([t, i]); });
+      for (const e of entries) {
+        const i = cellOf(e);
+        const b = this.boards[e.t];
+        if (i < 0 || b.kind[i] !== EMPTY) continue;
+        if (type === 'stone' && b.hg[i] > 0) continue;
+        let src = null;
+        if (s.inv[type] <= 0) {
+          src = pool.pop();
+          if (!src) break;
+          this.boards[src[0]].kind[src[1]] = EMPTY;
+          this.boards[src[0]].rebuild();
+          s.inv[type]++;
+        }
+        if (this.place(type, e.t, i, true)) changed = true;
+        else if (src) { // could not use it here: put it back
+          this.boards[src[0]].kind[src[1]] = kind;
+          this.boards[src[0]].rebuild();
+          s.inv[type]--;
+        }
+      }
+    }
+    // hourglass stacks
+    const stacks = bp.filter(e => e.type === 'hourglass');
+    const want = new Map();
+    for (const e of stacks) { const i = cellOf(e); if (i >= 0) want.set(e.t + ':' + i, e.n || 1); }
+    for (const e of stacks) {
+      const i = cellOf(e);
+      const b = this.boards[e.t];
+      if (i < 0 || b.kind[i] === STONE) continue;
+      let need = (e.n || 1) - b.hg[i];
+      for (let t = 0; t < this.boards.length && need > 0; t++) {
+        const bb = this.boards[t];
+        for (let j = 0; j < bb.n && need > 0; j++) {
+          if (bb.hg[j] === 0 || want.has(t + ':' + j)) continue;
+          const k = Math.min(need, bb.hg[j]);
+          bb.hg[j] -= k;
+          b.hg[i] += k;
+          need -= k;
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      for (const b of this.boards) b.rebuild();
+      this.layoutChanged();
+    }
   }
 
   applyMemory() {
@@ -888,6 +971,7 @@ export class Game {
     }
     bp.sort((p, q) => p.d - q.d);
     if (bp.length) this.s.blueprint = bp.map(({ t, type, dx, dy, n }) => (n ? { t, type, dx, dy, n } : { t, type, dx, dy }));
+    const funnels = this.boards.map(b => b.funnel < 0 ? null : [b.funnel % b.size - (b.size >> 1), ((b.funnel / b.size) | 0) - (b.size >> 1)]);
     // reset run state
     const s = this.s;
     s.dust = 0;
@@ -908,7 +992,15 @@ export class Game {
     this.applyMemory();
     const size = this.startSize();
     this.boards = [];
-    for (let t = 0; t < this.maxTables(); t++) this.boards.push(this.makeTable(t, size));
+    for (let t = 0; t < this.maxTables(); t++) {
+      const b = this.makeTable(t, size);
+      const f = funnels[t];
+      if (t > 0 && f) {
+        const x = (size >> 1) + f[0], y = (size >> 1) + f[1];
+        if (x >= 0 && y >= 0 && x < size && y < size) b.funnel = b.idx(x, y);
+      }
+      this.boards.push(b);
+    }
     this.layoutChanged();
     const free = this.startingHourglasses();
     for (let k = 0; k < free; k++) {

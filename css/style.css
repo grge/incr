@@ -263,7 +263,7 @@ textarea.save { width: 100%; height: 90px; background: var(--bg); color: var(--t
   #main { grid-template-columns: 1fr; padding: 12px; }
   #panel { position: static; max-height: none; }
   #top { flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
-  .currencies { order: 3; width: 100%; justify-content: flex-start; gap: 14px; }
+  .currencies { order: 3; flex-basis: 100%; justify-content: flex-start; gap: 14px; }
   .brand h1 { font-size: 22px; }
   .cur-val { font-size: 19px; }
   .top-actions { margin-left: auto; }

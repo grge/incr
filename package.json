@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Topple: an incremental game about sand and avalanches",
   "scripts": {
+    "test": "node tools/test.mjs",
     "bot": "node tools/bot.mjs",
     "serve": "python3 -m http.server 8080"
   }

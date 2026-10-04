@@ -82,23 +82,6 @@ export class Board {
     this.grains[i] += amount;
   }
 
-  // Pour `perHourglass` grains (fractional) from every hourglass, using accumulators.
-  feed(perHourglass) {
-    const hs = this.hourglasses, acc = this.acc, g = this.grains, hg = this.hg;
-    let dropped = 0;
-    for (let j = 0; j < hs.length; j++) {
-      const i = hs[j];
-      acc[i] += perHourglass * hg[i];
-      if (acc[i] >= 1) {
-        const k = Math.floor(acc[i]);
-        acc[i] -= k;
-        g[i] += k;
-        dropped += k;
-      }
-    }
-    return dropped;
-  }
-
   // One synchronous toppling round. Returns stats.
   round(sampleSpills = false) {
     const n = this.n, g = this.grains, K = this._K, act = this._act;
