@@ -950,7 +950,7 @@ export class UI {
       const full = atLimit ? (type === 'crystal' ? 'Every geode has one' : 'Limit reached') : null;
       const html = full || `Buy · <span class="cost">✦ ${fmt(cost)}</span>`;
       if (buyBtn.innerHTML !== html) buyBtn.innerHTML = html;
-      if (maxBtn) maxBtn.disabled = s.dust < cost;
+      if (maxBtn) maxBtn.disabled = atLimit || s.dust < cost;
       let d;
       if (type === 'hourglass') {
         const nm = g.nextMilestone();
