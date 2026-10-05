@@ -43,6 +43,25 @@ There are no dead ends: buildings can be rearranged freely at any time, stones
 can never trap sand, doctrines and tables are chosen afresh every sweep, and
 income never stops.
 
+A full playthrough to the ending takes roughly 4 hours if you play actively
+and 6 if you play casually; idle play takes longer, and the game keeps earning
+(and digging) while the tab is closed. Something new arrives every few
+minutes the whole way: your first relic within the first few minutes, a new
+kind of ground on each of the first few tables, doctrines and prisms around
+the first sweep (~20 minutes), the fold within the hour, trials from about
+1¼ hours, a cascade of tables around 2½ hours, and the Great Hourglass in the
+fourth hour. (Timings are from the balance bot; see below.)
+
+## Tips
+
+- Hover any cell to learn what it is and what a grain dropped there is worth.
+- Move your hourglass stack onto a dig site to dig it fast, then move it back.
+- **Survey** (S) shows where a grain is worth most (*value*) and where the table
+  topples most (*flow*). Hourglasses want value; crystals want flow.
+- Drag hourglasses and buildings to move them. Drag them off the table, or
+  right-click, to put them back in your pocket.
+- Keys: **Q** quake · **S** survey · **1–3** switch tables · **Esc** cancel.
+
 ## Running locally
 
 It is a static site with no build step. Serve the folder with any web server
@@ -97,7 +116,9 @@ and prints a timeline (profiles: `active`, `casual`, `idle`) — it digs for
 relics, chooses tables and doctrines, and reports the longest stretches with
 nothing new happening. `node tools/summary.mjs` compares the profiles'
 milestones.
-`node tools/calibrate_seq.mjs tools/targets.json` re-tunes costs against the
-target schedule in `tools/targets.json`, and `node tools/tune_late.mjs`
-jointly tunes trial goals and the late game. `node tools/test.mjs` runs the
+`node tools/calibrate_seq.mjs tools/targets.json` tunes costs one at a time
+against the target schedule in `tools/targets.json`; because late-game
+purchases compound, `node tools/tune_late.mjs <base.json>` then tunes the late
+kiln, trials and the Great Hourglass together with full playthroughs, and
+`node tools/apply_calibration.mjs` writes the result into `js/data.js`. `node tools/test.mjs` runs the
 logic tests (also run by the deploy workflow).
