@@ -1,50 +1,68 @@
-// Joint tuning of trial goals and late-game costs using full playthroughs.
-// Usage: node tools/tune_late.mjs [iterations]
+// Joint tuning of the late game with full playthroughs. Late kiln items,
+// late upgrades, trial goals and the Great Hourglass all feed each other
+// (each speeds up the next), so they are tuned together rather than one by one.
+// Usage: node tools/tune_late.mjs base.json [iterations] [out.json]
 import fs from 'node:fs';
 import * as D from '../js/data.js';
 import { simulate, applyOverrides } from './bot.mjs';
+import { fmtTime } from '../js/format.js';
 
-const iters = +(process.argv[2] || 6);
-const trialTarget = 360;
-const kilnT = { k_kiln2: 10500, k_quarry: 11000, k_cascade: 11400, k_horizon: 12000, k_cascade2: 12600, k_furnace: 13200, k_great: 13900 };
-const greatT = { g_frame: 14200, g_lower: 14600, g_neck: 15000, g_upper: 15500, g_fill: 16100 };
-const ov = { trials: {}, kiln: {}, great: {} };
-for (const t of D.TRIALS) ov.trials[t.id] = t.goal;
-for (const id in kilnT) ov.kiln[id] = D.KILN_MAP[id].cost;
-for (const id in greatT) { const g = D.GREAT.find(x => x.id === id); ov.great[id] = { glass: g.glass, sand: g.sand }; }
+const base = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const iters = +(process.argv[3] || 10);
+const outFile = process.argv[4] || 'tools/scratch/late.json';
+const targets = JSON.parse(fs.readFileSync('tools/targets.json', 'utf8'));
+const late = targets.late;
+
+const ov = JSON.parse(JSON.stringify(base));
+const items = [];
+for (const id in late.kiln) items.push({ kind: 'kiln', id, tgt: late.kiln[id] });
+for (const id in late.upgrades) items.push({ kind: 'upgrades', id, tgt: late.upgrades[id] });
+for (const id in late.great) items.push({ kind: 'great', id, tgt: late.great[id] });
+for (const id in targets.trials) items.push({ kind: 'trials', id, tgt: targets.trials[id] });
+for (const it of items) {
+  it.gain = it.kind === 'trials' ? 6 : 25;
+  it.prevErr = null;
+  if (it.kind === 'great') {
+    const g = D.GREAT.find(x => x.id === it.id);
+    ov.great[it.id] = ov.great[it.id] || { glass: g.glass, sand: g.sand };
+    it.field = g.glass ? 'glass' : 'sand';
+  } else if (ov[it.kind][it.id] === undefined) {
+    ov[it.kind][it.id] = it.kind === 'kiln' ? D.KILN_MAP[it.id].cost : it.kind === 'upgrades' ? D.UPGRADE_MAP[it.id].cost : D.TRIAL_MAP[it.id].goal;
+  }
+}
+const get = (it) => it.kind === 'great' ? ov.great[it.id][it.field] : ov[it.kind][it.id];
+const set = (it, v) => { if (it.kind === 'great') ov.great[it.id][it.field] = v; else ov[it.kind][it.id] = v; };
 
 let best = null;
-for (let it = 0; it < iters; it++) {
+const MAX = Math.log(1e4);
+for (let n = 0; n < iters; n++) {
   applyOverrides(ov);
   const r = simulate({ hours: 6, profile: 'active' });
+  const horizon = r.t;
   let err = 0;
   const rows = [];
-  for (const t of D.TRIALS) {
-    const d = r.trialsDone[t.id];
-    const got = d ? d.runT : 1500;
-    const ratio = (got + 30) / (trialTarget + 30);
-    err += Math.abs(Math.log(ratio));
-    ov.trials[t.id] *= Math.pow(1 / ratio, d ? 2.5 : 6);
-    rows.push(`${t.id} ${d ? d.runT : '-'}s`);
+  for (const it of items) {
+    let got, e;
+    if (it.kind === 'trials') {
+      const d = r.trialsDone[it.id];
+      got = d ? d.runT : undefined;
+      e = got === undefined ? Math.log(4) : Math.log((got + 30) / (it.tgt + 30));
+    } else {
+      got = it.kind === 'great' ? r.greats[D.GREAT.findIndex(g => g.id === it.id) + 1] : r.purchases[it.id];
+      e = got === undefined ? Math.log((horizon + 1800) / (it.tgt + 300)) : Math.log((got + 300) / (it.tgt + 300));
+    }
+    it.err = e;
+    err += Math.abs(e);
+    rows.push(`${it.id} ${got === undefined ? '-' : (it.kind === 'trials' ? got + 's' : fmtTime(got))}`);
   }
-  for (const id in kilnT) {
-    const got = r.purchases[id] ?? 22000;
-    const ratio = (got + 300) / (kilnT[id] + 300);
-    err += Math.abs(Math.log(ratio)) * 3;
-    ov.kiln[id] *= Math.pow(1 / ratio, 12);
-    rows.push(`${id} ${got}/${kilnT[id]}`);
+  console.log(`iter ${n} err ${err.toFixed(2)} end ${r.endedAt ? fmtTime(r.endedAt) : '-'}\n  ${rows.join(' · ')}`);
+  if (!best || err < best.err) best = { err, it: n, ov: JSON.parse(JSON.stringify(ov)) };
+  fs.writeFileSync(outFile, JSON.stringify(best.ov, null, 1));
+  // reached too late → cheaper; too early → dearer. Halve the gain whenever we overshoot.
+  for (const it of items) {
+    if (it.prevErr !== null && Math.sign(it.err) !== Math.sign(it.prevErr) && Math.abs(it.err) > 0.01) it.gain *= 0.5;
+    it.prevErr = it.err;
+    set(it, get(it) * Math.exp(Math.max(-MAX, Math.min(MAX, -it.gain * it.err))));
   }
-  for (const id in greatT) {
-    const idx = D.GREAT.findIndex(x => x.id === id) + 1;
-    const got = r.greats[idx] ?? 22000;
-    const ratio = (got + 300) / (greatT[id] + 300);
-    err += Math.abs(Math.log(ratio)) * 3;
-    const f = Math.pow(1 / ratio, 12);
-    ov.great[id].glass *= f; ov.great[id].sand *= f;
-    rows.push(`${id} ${got}/${greatT[id]}`);
-  }
-  console.log(`iter ${it} err ${err.toFixed(2)} end ${r.endedAt}\n  ${rows.join(' · ')}`);
-  if (!best || err < best.err) best = { err, ov: JSON.parse(JSON.stringify(ov)), it };
 }
-fs.writeFileSync('tools/scratch/late.json', JSON.stringify(best, null, 1));
 console.log('best iter', best.it, best.err.toFixed(2));

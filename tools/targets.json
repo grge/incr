@@ -65,5 +65,29 @@
   "g_neck": 14500,
   "g_upper": 15300,
   "g_fill": 16200
+ },
+ "late": {
+  "kiln": {
+   "k_kiln2": 8200,
+   "k_quarry": 8700,
+   "k_cascade": 9300,
+   "k_horizon": 10000,
+   "k_cascade2": 10800,
+   "k_furnace": 11600,
+   "k_great": 12400
+  },
+  "upgrades": {
+   "u_t23": 10250,
+   "u_rose": 10600,
+   "u_t25": 11000,
+   "u_starlight": 11500
+  },
+  "great": {
+   "g_frame": 13000,
+   "g_lower": 13600,
+   "g_neck": 14200,
+   "g_upper": 14800,
+   "g_fill": 15500
+  }
  }
 }
