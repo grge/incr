@@ -88,6 +88,14 @@
    "g_neck": 14200,
    "g_upper": 14800,
    "g_fill": 15500
+  },
+  "trials": {
+   "t_narrow": 6000,
+   "t_still": 7000,
+   "t_wind": 8000,
+   "t_crumble": 9000,
+   "t_scatter": 10000,
+   "t_glassless": 11000
   }
  }
 }

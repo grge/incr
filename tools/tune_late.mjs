@@ -18,9 +18,11 @@ const items = [];
 for (const id in late.kiln) items.push({ kind: 'kiln', id, tgt: late.kiln[id] });
 for (const id in late.upgrades) items.push({ kind: 'upgrades', id, tgt: late.upgrades[id] });
 for (const id in late.great) items.push({ kind: 'great', id, tgt: late.great[id] });
-for (const id in targets.trials) items.push({ kind: 'trials', id, tgt: targets.trials[id] });
+// trials are attempted once normal runs clearly beat the goal, so a goal sets
+// when a trial is done (not how long it takes): tune their completion times
+for (const id in late.trials) items.push({ kind: 'trials', id, tgt: late.trials[id] });
 for (const it of items) {
-  it.gain = it.kind === 'trials' ? 6 : 25;
+  it.gain = it.kind === 'trials' ? 15 : 25;
   it.prevErr = null;
   if (it.kind === 'great') {
     const g = D.GREAT.find(x => x.id === it.id);
@@ -43,17 +45,12 @@ for (let n = 0; n < iters; n++) {
   const rows = [];
   for (const it of items) {
     let got, e;
-    if (it.kind === 'trials') {
-      const d = r.trialsDone[it.id];
-      got = d ? d.runT : undefined;
-      e = got === undefined ? Math.log(4) : Math.log((got + 30) / (it.tgt + 30));
-    } else {
-      got = it.kind === 'great' ? r.greats[D.GREAT.findIndex(g => g.id === it.id) + 1] : r.purchases[it.id];
-      e = got === undefined ? Math.log((horizon + 1800) / (it.tgt + 300)) : Math.log((got + 300) / (it.tgt + 300));
-    }
+    got = it.kind === 'trials' ? r.trialsDone[it.id]?.t
+      : it.kind === 'great' ? r.greats[D.GREAT.findIndex(g => g.id === it.id) + 1] : r.purchases[it.id];
+    e = got === undefined ? Math.log((horizon + 1800) / (it.tgt + 300)) : Math.log((got + 300) / (it.tgt + 300));
     it.err = e;
     err += Math.abs(e);
-    rows.push(`${it.id} ${got === undefined ? '-' : (it.kind === 'trials' ? got + 's' : fmtTime(got))}`);
+    rows.push(`${it.id} ${got === undefined ? '-' : fmtTime(got)}`);
   }
   console.log(`iter ${n} err ${err.toFixed(2)} end ${r.endedAt ? fmtTime(r.endedAt) : '-'}\n  ${rows.join(' · ')}`);
   if (!best || err < best.err) best = { err, it: n, ov: JSON.parse(JSON.stringify(ov)) };
