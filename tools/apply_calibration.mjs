@@ -23,14 +23,8 @@ const lit = (x) => {
   return `${m}e${e}`;
 };
 
-// kiln: monotone in target order
-const korder = Object.keys(targets.kiln).sort((a, b) => targets.kiln[a] - targets.kiln[b]);
-let prev = 0;
-for (const id of korder) {
-  if (cal.kiln[id] === undefined) continue;
-  let c = nice(cal.kiln[id]);
-  if (c < prev * 1.1) c = nice(prev * 1.15);
-  prev = c;
+for (const id in cal.kiln) {
+  const c = nice(cal.kiln[id]);
   const re = new RegExp(`(\\{ id: '${id}', name: '(?:[^'\\\\]|\\\\.)*', cost: )[0-9.e+]+`);
   if (!re.test(src)) throw new Error('kiln ' + id);
   src = src.replace(re, `$1${lit(c)}`);

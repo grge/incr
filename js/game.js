@@ -384,10 +384,10 @@ export class Game {
   addDigs(t) {
     const map = this.mapFor(t);
     if (!map) return;
-    const tier = this.s.tableDefs[t].tier;
+    const found = this.relicCount();
     for (const p of map.digs) {
       const ring = Math.max(Math.abs(p.mx - C), Math.abs(p.my - C));
-      this.s.digs.push({ t, mx: p.mx, my: p.my, ring, need: D.digNeed(ring, tier), prog: 0, relic: null, done: false });
+      this.s.digs.push({ t, mx: p.mx, my: p.my, ring, need: D.digNeed(ring, found), prog: 0, relic: null, done: false });
     }
     this.assignRelics();
   }

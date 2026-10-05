@@ -53,6 +53,7 @@ export function simulate({ hours = 5, profile = 'active', verbose = false, noSwe
 
   let peakRate = 0, runStartT = 0, lastReport = 0, endedAt = null, trialStart = 0;
   let sinceTrial = 0;
+  let bestRun = 0;   // dust in the strongest recent normal run
   let noStoneUntil = 0;
   const deferred = {};
   const seen = new Set();
@@ -197,6 +198,7 @@ export function simulate({ hours = 5, profile = 'active', verbose = false, noSwe
   }
 
   function doSweep(trial = null) {
+    if (!g.s.trial) bestRun = Math.max(bestRun * 0.5, g.s.dustRun);
     const gain = g.glassGain();
     const runT = t - runStartT;
     events.push({ t, type: 'sweep', gain, runT, trial: g.s.trial });
@@ -259,7 +261,8 @@ export function simulate({ hours = 5, profile = 'active', verbose = false, noSwe
     const runT = t - runStartT;
     const gain = g.glassGain();
     if (g.s.trial) {
-      if (g.s.trials[g.s.trial] || runT > 1200) {
+      // give up on a trial that is clearly not going to make it
+      if (g.s.trials[g.s.trial] || runT > 900) {
         if (!g.s.trials[g.s.trial]) { deferred[g.s.trial] = 3; note(`  trial ${g.s.trial} FAILED (${fmt(g.s.dustRun)} / ${fmt(D.TRIAL_MAP[g.s.trial].goal)})`); }
         doSweep(null);
       }
@@ -280,7 +283,8 @@ export function simulate({ hours = 5, profile = 'active', verbose = false, noSwe
         let trial = null;
         if (g.has('trials') && sinceTrial >= 1) {
           // in list order, like a player working down the tab
-          const open = D.TRIALS.filter(tr => !g.s.trials[tr.id] && Number.isFinite(tr.goal) && !(deferred[tr.id] > 0));
+          // only once normal runs comfortably beat the goal, like a player reading it
+          const open = D.TRIALS.filter(tr => !g.s.trials[tr.id] && Number.isFinite(tr.goal) && !(deferred[tr.id] > 0) && tr.goal * 30 <= bestRun);
           for (const id in deferred) deferred[id]--;
           if (open.length) trial = open[0].id;
         }
