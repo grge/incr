@@ -269,10 +269,13 @@ export function simulate({ hours = 5, profile = 'active', verbose = false, noSwe
     } else if (gain >= 1 && !noSweep) {
       const rate = gain / Math.max(1, runT);
       peakRate = Math.max(peakRate, rate);
-      const next = D.KILN.filter(k => g.kilnAvailable(k)).sort((a, b) => a.cost - b.cost)[0];
-      const need = next ? next.cost - g.s.glass : Infinity;
+      // the next thing glass is for: a kiln item, or the next stage of the Great Hourglass
+      const nk = D.KILN.filter(k => g.kilnAvailable(k)).sort((a, b) => a.cost - b.cost)[0];
+      const gs = g.has('great') ? g.greatNext() : null;
+      const goal = Math.min(nk ? nk.cost : Infinity, gs && gs.glass ? gs.glass : Infinity);
+      const next = Number.isFinite(goal);
+      const need = next ? goal - g.s.glass : Infinity;
       const enough = gain >= Math.max(1, Math.min(g.s.glassAll * 0.5, need));
-      // a player finishing a nearly done dig before sweeping
       // relics are permanent: finish the digs in reach before sweeping
       let digLeft = 0;
       for (const d of g.visibleDigs()) digLeft += (d.need - d.prog) / Math.max(1e-9, g.digRate(d) * 2);

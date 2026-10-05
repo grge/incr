@@ -97,7 +97,8 @@ export function generateTable({ seed, tier = 1, arch = null, first = false }) {
   let digCount = first ? 3 : 1 + (arch === 'ruin' ? 2 : (R() < 0.45 ? 1 : 0));
   const digRings = first ? [[2, 2], [5, 5], [6, 6]] : [];
   for (let k = 0; k < digCount; k++) {
-    const [r0, r1] = digRings[k] || (k === 0 ? [2, 5] : [4, 10]);
+    // later tables bury things deeper
+    const [r0, r1] = digRings[k] || (k === 0 ? [2, 5] : [4 + Math.min(4, Math.floor(tier / 5)), 10]);
     const p = pick(r0, r1);
     if (!p) continue;
     terr[idx(p[0], p[1])] = T_DIG;
