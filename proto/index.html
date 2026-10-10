@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Topple — Watershed prototype</title>
+  <meta name="theme-color" content="#16120e">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2316120e'/%3E%3Cpath d='M9 6h14l-7 10zM9 26h14l-7-10z' fill='%23a9e2dc'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header id="top">
+    <div class="brand"><span class="logo">⧗</span><h1>Topple</h1><span class="tag">Watershed · prototype</span></div>
+    <div class="cur"><span class="cur-icon">✦</span><span id="dust">0</span><span class="muted"> dust</span><span id="rate" class="rate"></span></div>
+    <div id="denom" class="muted small"></div>
+  </header>
+  <main id="main">
+    <section id="stage">
+      <div id="boardWrap"><canvas id="board" aria-label="The region"></canvas><div id="hint" class="hidden"></div></div>
+      <div id="info">&nbsp;</div>
+    </section>
+    <aside id="panel"></aside>
+  </main>
+  <div id="toasts" aria-live="polite"></div>
+  <div id="modal" class="hidden" role="dialog" aria-modal="true"><div id="modalCard"></div></div>
+  <noscript><p style="padding:2em;color:#ddd">This prototype needs JavaScript.</p></noscript>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
