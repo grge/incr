@@ -4,7 +4,7 @@ import { View } from './view.js';
 import { UI } from './ui.js';
 import { fmt, fmtTime } from '../../js/format.js';
 
-const KEY = 'topple.proto.v1';
+const KEY = 'topple.proto.v2';
 let resetting = false;
 
 function save(game) {

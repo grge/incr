@@ -5,6 +5,24 @@ export const FREE = 0, ROCK = 1, CRACK = 2, OUT = 3;
 
 const MIN_SHARED = 2;   // pixels of shared border needed to count as neighbours
 
+// Distance from a seed to a point. Seeds can be stretched along an angle
+// (k > 1 makes long cells, like dunes) and weighted (w > 1 gives a head
+// start, so big cells such as boulders; additive weights keep every cell in
+// one piece around its seed).
+const HEAD_START = 12;
+export function seedDist(sd, x, y) {
+  const dx = x - sd.x, dy = y - sd.y;
+  const k = sd.k || 1, w = sd.w || 1;
+  let d;
+  if (k === 1) d = Math.hypot(dx, dy);
+  else {
+    if (sd._c === undefined) { sd._c = Math.cos(sd.a || 0); sd._s = Math.sin(sd.a || 0); }
+    const u = dx * sd._c + dy * sd._s, v = -dx * sd._s + dy * sd._c;
+    d = Math.hypot(u / k, v * k);
+  }
+  return w === 1 ? d : d - (w - 1) * HEAD_START;
+}
+
 // Min-heap of (key, value) pairs.
 class Heap {
   constructor(cap = 1 << 15) {
@@ -101,7 +119,7 @@ export class Tess {
     const p = this.pixel(sd.x, sd.y);
     if (p < 0 || this.mask[p] !== FREE) return;
     const W = this.W;
-    const d = Math.hypot((p % W) + 0.5 - sd.x, ((p / W) | 0) + 0.5 - sd.y);
+    const d = seedDist(sd, (p % W) + 0.5, ((p / W) | 0) + 0.5);
     if (d < this.dist[p]) {
       this.dist[p] = d;
       this.lab[p] = slot;
@@ -109,8 +127,8 @@ export class Tess {
     }
   }
 
-  // Grow labels outward. Priority is the straight-line distance to the
-  // label's seed, so open ground gets true Voronoi bisectors.
+  // Grow labels outward. Priority is the distance to the label's seed, so
+  // open ground gets true Voronoi bisectors.
   _grow() {
     const { W, H, mask, lab, dist, seeds, heap } = this;
     while (heap.n > 0) {
@@ -126,7 +144,7 @@ export class Tess {
         if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
         const q = ny * W + nx;
         if (mask[q] !== FREE) continue;
-        const nd = Math.hypot(nx + 0.5 - sd.x, ny + 0.5 - sd.y);
+        const nd = seedDist(sd, nx + 0.5, ny + 0.5);
         if (nd < dist[q] - 1e-9) {
           dist[q] = nd;
           lab[q] = s;
@@ -145,11 +163,11 @@ export class Tess {
   }
 
   // Changes always rebuild from scratch (about 20 ms): the cells are then a
-  // pure function of where the stakes are, so previews match placements.
-  add(x, y) {
+  // pure function of where the seeds are.
+  add(seed) {
     let slot = this.seeds.indexOf(null);
     if (slot < 0) slot = this.seeds.length;
-    this.seeds[slot] = { x, y };
+    this.seeds[slot] = seed;
     this.rebuild();
     return slot;
   }
@@ -160,7 +178,7 @@ export class Tess {
   }
 
   move(slot, x, y) {
-    this.seeds[slot] = { x, y };
+    this.seeds[slot] = Object.assign({}, this.seeds[slot], { x, y, _c: undefined });
     this.rebuild();
   }
 }
@@ -177,6 +195,7 @@ export function buildGraph(t) {
   }
   const n = slotOf.length;
   const area = new Float64Array(n), cx = new Float64Array(n), cy = new Float64Array(n);
+  const mxx = new Float64Array(n), myy = new Float64Array(n), mxy = new Float64Array(n);
   const edgeC = new Int32Array(n), crackC = new Int32Array(n);
   const border = new Uint8Array(W * H);
   const pairs = new Map();
@@ -193,6 +212,7 @@ export function buildGraph(t) {
       const ca = cellOf[a];
       if (ca < 0) continue;
       area[ca]++; cx[ca] += x + 0.5; cy[ca] += y + 0.5;
+      mxx[ca] += (x + 0.5) * (x + 0.5); myy[ca] += (y + 0.5) * (y + 0.5); mxy[ca] += (x + 0.5) * (y + 0.5);
       for (let k = 0; k < 4; k++) {
         const nx = x + (k === 0 ? 1 : k === 1 ? -1 : 0);
         const ny = y + (k === 2 ? 1 : k === 3 ? -1 : 0);
@@ -231,7 +251,13 @@ export function buildGraph(t) {
     exE[c] = edgeC[c] >= MIN_SHARED ? Math.max(1, Math.round(edgeC[c] / avg)) : 0;
     exC[c] = crackC[c] >= MIN_SHARED ? Math.max(1, Math.round(crackC[c] / avg)) : 0;
     thr[c] = lists[c].length + exE[c] + exC[c];
-    if (area[c] > 0) { cx[c] /= area[c]; cy[c] /= area[c]; }
+    if (area[c] > 0) {
+      cx[c] /= area[c]; cy[c] /= area[c];
+      // second moments about the centroid: the cell's shape and long axis
+      mxx[c] = mxx[c] / area[c] - cx[c] * cx[c];
+      myy[c] = myy[c] / area[c] - cy[c] * cy[c];
+      mxy[c] = mxy[c] / area[c] - cx[c] * cy[c];
+    }
   }
   // every cell must have a way out; a sealed cell (only possible in odd
   // corners) is given one so sand never piles up forever
@@ -243,7 +269,7 @@ export function buildGraph(t) {
     for (let k = nbrStart[c]; k < nbrStart[c + 1]; k++) if (!ok[nbr[k]]) { ok[nbr[k]] = 1; stack.push(nbr[k]); }
   }
   for (let c = 0; c < n; c++) if (!ok[c]) { exE[c]++; thr[c]++; }
-  return { n, slotOf, cellOf, area, cx, cy, nbrStart, nbr, shared, exE, exC, thr, border };
+  return { n, slotOf, cellOf, area, cx, cy, mxx, myy, mxy, nbrStart, nbr, shared, exE, exC, thr, border };
 }
 
 // Cell index under pixel p, or -1.

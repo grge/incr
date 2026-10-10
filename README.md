@@ -66,13 +66,18 @@ fourth hour. (Timings are from the balance bot; see below.)
 
 **Try it:** https://grge.github.io/incr/proto/
 
-An early prototype of the next version: one region whose cells are a Voronoi
-diagram you shape by driving stakes. Rock walls and cracks constrain the
-cells; the sandpile runs on whatever graph you build (a cell topples when it
-holds as many grains as it has ways out); sand wears the ground away and
-uncovers what is buried; and the Survey switches scoring from the live
-sandpile to its exact steady-state average. It has a sandbox panel for
-experimenting. Code is in `proto/` (`node proto/tools/test.mjs` runs its tests).
+An early prototype of the next version: one region of ground that shapes
+itself. Each region is a patchwork of Voronoi "recipes" — basalt columns,
+mudflats, wind-stretched dunes, boulder fields, terraces, and often a river
+channel walled in by rock. The sandpile runs on the resulting graph (a cell
+topples when it holds as many grains as it has ways out). Cells crack in two
+where sand is busiest, so the land grows finer around your spouts; cracked
+ground that sand stops reaching settles back together. Sand also wears the
+ground away and uncovers what is buried. You choose where to pour, upgrade,
+chisel a cell now and then, or set off a tremor. Income comes from the live
+sandpile until the Survey switches it to the exact steady-state average.
+There is a sandbox panel for experimenting. Code is in `proto/`
+(`node proto/tools/test.mjs` runs its tests).
 
 ## Running locally
 

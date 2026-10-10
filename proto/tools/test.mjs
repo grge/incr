@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict';
 import { Tess, buildGraph, FREE } from '../js/voronoi.js';
 import { Pile, solve } from '../js/pile.js';
-import { generateRegion, mulberry32 } from '../js/region.js';
+import { generateRegion, mulberry32, RECIPE_IDS } from '../js/region.js';
+import { Game, newState } from '../js/game.js';
 
 let passed = 0;
 function test(name, fn) {
@@ -11,9 +12,9 @@ function test(name, fn) {
 }
 const W = 320;
 
-function tessFor(region, extra = []) {
+function tessFor(region) {
   const t = new Tess(W, W, region.mask);
-  for (const [x, y] of [...region.stakes, ...extra]) t.seeds.push({ x, y });
+  t.seeds = region.seeds.map(q => Object.assign({}, q));
   t.rebuild();
   return t;
 }
@@ -22,7 +23,7 @@ test('regions: a free middle, everything else reachable from it', () => {
   for (let seed = 1; seed <= 8; seed++) {
     const r = generateRegion(seed, W);
     assert.equal(r.mask[(W / 2) * W + W / 2], FREE);
-    assert.ok(r.stakes.length >= 5, `seed ${seed}: ${r.stakes.length} stakes`);
+    assert.ok(r.seeds.length >= 80, `seed ${seed}: ${r.seeds.length} seeds`);
     assert.ok(r.buried.length >= 8);
   }
 });
@@ -45,11 +46,11 @@ test('every free pixel reachable belongs to a cell; graph is symmetric and drain
   }
 });
 
-test('cells depend only on where the stakes are', () => {
+test('cells depend only on where the seeds are', () => {
   const r = generateRegion(5, W);
   const t = tessFor(r);
   const before = Int32Array.from(t.lab);
-  const s = t.add(150, 120);
+  const s = t.add({ x: 150, y: 120 });
   t.move(s, 158, 131);
   t.remove(s);
   let diff = 0;
@@ -78,18 +79,51 @@ test('steady-state solver matches the live sandpile', () => {
   assert.ok(Math.abs(per - v[src]) / v[src] < 0.03, `sim ${per} vs solver ${v[src]}`);
 });
 
-test('a stake costs little to place', () => {
-  const r = generateRegion(2, W);
-  const t = tessFor(r);
-  const t0 = performance.now();
-  for (let k = 0; k < 20; k++) {
-    const c = t.clone();
-    const x = 100 + k * 6, y = 150;
-    if (c.canSeed(x, y, 9)) { c.add(x, y); buildGraph(c); }
+test('every recipe covers its ground', () => {
+  for (const id of RECIPE_IDS) {
+    const r = generateRegion(11, W, id);
+    const t = tessFor(r);
+    const g = buildGraph(t);
+    assert.ok(g.n >= 60, `${id}: ${g.n} cells`);
+    assert.ok(r.seeds.every(q => q.z === id || q.z === 'river'));
   }
-  const ms = (performance.now() - t0) / 20;
-  console.log(`    ${ms.toFixed(1)} ms per previewed stake`);
-  assert.ok(ms < 60);
+});
+
+test('busy cells crack, the graph stays sound, and cracking keeps a steady pace', () => {
+  const game = new Game(newState(4));
+  const n0 = game.g.n;
+  for (let k = 0; k < 600; k++) game.tick(0.5);    // five minutes
+  const g = game.g;
+  assert.ok(g.n > n0 + 10, `cells ${n0} -> ${g.n}`);
+  assert.ok(g.n < n0 + 400, `cells ${n0} -> ${g.n}: cracking ran away`);
+  for (let c = 0; c < g.n; c++) for (let e = g.nbrStart[c]; e < g.nbrStart[c + 1]; e++) {
+    const b = g.nbr[e];
+    let back = false;
+    for (let f = g.nbrStart[b]; f < g.nbrStart[b + 1]; f++) if (g.nbr[f] === c) back = true;
+    assert.ok(back);
+  }
+  assert.ok(Number.isFinite(game.expected) && game.expected > 0);
+});
+
+test('the chisel cracks the cell you choose; a tremor loads the pile', () => {
+  const game = new Game(newState(6));
+  const n0 = game.g.n;
+  const [x, y] = game.s.spouts[0];
+  assert.equal(game.chisel(x, y), 'ok');
+  assert.equal(game.g.n, n0 + 1);
+  const pv = game.previewChisel(x, y);
+  assert.ok(pv.ok && pv.ratio > 0);
+  assert.equal(game.g.n, n0 + 1, 'previewing changes nothing');
+  assert.ok(game.tremor());
+  assert.equal(game.tremor(), false, 'tremors need to recharge');
+});
+
+test('saves round-trip the shaped land', () => {
+  const game = new Game(newState(8));
+  for (let k = 0; k < 200; k++) game.tick(0.5);
+  const h = new Game(JSON.parse(game.serialize()));
+  assert.equal(h.g.n, game.g.n);
+  assert.ok(Math.abs(h.expected - game.expected) / game.expected < 1e-6);
 });
 
 console.log(`${passed} tests passed`);

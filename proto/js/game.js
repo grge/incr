@@ -1,40 +1,51 @@
-// Prototype rules: one region shaped by stakes, fed by spouts, worn down by
-// its own sand. Two ways of scoring: from the live sandpile (each grain you
-// see stands for N grains), or — after the Survey — from the steady state.
+// Prototype rules. The land shapes itself: cells crack where sand is busiest
+// and quiet cracked ground settles back together. You choose where to pour,
+// what to upgrade, and occasionally chisel or shake the ground.
+// Income comes from the live sandpile (each grain you see stands for N
+// grains); the Survey switches to the exact steady-state average.
 import { Tess, buildGraph, FREE, CRACK } from './voronoi.js';
 import { Pile, solve } from './pile.js';
-import { generateRegion, mulberry32, RELICS } from './region.js';
+import { generateRegion, mulberry32, RELICS, RECIPES } from './region.js';
 
 export const RASTER = 320;
-export const GAP = 9;              // stakes must be at least this far apart (raster px)
 export const BUDGET = 20;          // visible grains per second before the sand coarsens
-const ROUNDS = 30;                 // live toppling rounds per second
+const ROUNDS = 30;                 // live toppling rounds per second (more on big lands)
 const ORE_K = 4;                   // a cell made entirely of ore is worth 5×
-const ERODE = 2;                   // how fast sand wears the ground away
-const SAVE_V = 1;
+// Erosion and cracking follow each cell's *share* of all topples, so their
+// total pace stays steady however rich the land becomes.
+const ERODE = 80;                  // how fast sand wears the ground away
+const CRACK_RATE = 0.3;            // stress added per second, shared out by topples
+const MIN_AREA = 70;               // cells smaller than this never crack (before Fine Grain)
+const SETTLE_AFTER = 90;           // seconds a quiet, cracked cell waits before settling back
+const CHISEL_MAX = 3, CHISEL_REGEN = 40;
+const TREMOR_CD = 45;
+const SAVE_V = 2;
 
 export const DENOMS = ['sand', 'grit', 'gravel', 'pebbles', 'stones', 'cobbles', 'boulders', 'crags', 'cliffs', 'mountains'];
 
 export const SHOP = [
-  { id: 'stake', name: 'Stake', desc: 'Carve a new cell out of the land.', base: 12, growth: 1.17, item: true },
-  { id: 'spout', name: 'Spout', desc: 'Pours a steady trickle of sand.', base: 40, growth: 1.75, item: true },
+  { id: 'spout', name: 'Spout', desc: 'Pours a steady trickle of sand. Where you put it decides where the land cracks.', base: 40, growth: 1.9, item: true },
   { id: 'rate', name: 'Finer Sand', desc: 'Spouts pour twice as fast.', base: 150, growth: 12 },
   { id: 'value', name: 'Sifting', desc: 'Every topple is worth twice as much.', base: 600, growth: 15 },
+  { id: 'brittle', name: 'Brittle Ground', desc: 'The ground cracks twice as fast under busy sand.', base: 250, growth: 20, max: 4 },
+  { id: 'fine', name: 'Fine Grain', desc: 'Cracks can split the ground into smaller cells.', base: 2000, growth: 25, max: 3 },
   { id: 'erode', name: 'Harder Sand', desc: 'Sand wears the ground away twice as fast.', base: 400, growth: 10 },
   { id: 'survey', name: 'The Survey', base: 25000, once: true,
     desc: 'Understand the land: earn the exact average of what the sand does, instead of what it happens to do.' },
 ];
 export const SHOP_MAP = Object.fromEntries(SHOP.map(x => [x.id, x]));
 
-export function newState(seed = Math.floor(Math.random() * 1e9)) {
+export function newState(seed = Math.floor(Math.random() * 1e9), only = null) {
   return {
-    v: SAVE_V, seed, dust: 0, dustAll: 0, played: 0,
-    stakes: null, spouts: null,
-    inv: { stake: 0, spout: 0 },
-    lv: { stake: 0, spout: 0, rate: 0, value: 0, erode: 0 },
+    v: SAVE_V, seed, only, dust: 0, dustAll: 0, played: 0,
+    seeds: null, spouts: null,
+    inv: { spout: 0 },
+    lv: { spout: 0, rate: 0, value: 0, brittle: 0, fine: 0, erode: 0 },
     survey: false, mode: 'live',
     found: [], relics: [],
-    stats: { topples: 0, maxWave: 0, clicks: 0 },
+    chisel: CHISEL_MAX, tremorCd: 0,
+    stats: { topples: 0, maxWave: 0, clicks: 0, splits: 0, merges: 0 },
+    settings: { fracture: true, settle: true },
     sandbox: false, speed: 1, lastSave: Date.now(),
   };
 }
@@ -56,6 +67,8 @@ function decodeDepth(b64, n) {
   for (let i = 0; i < n && i < q.length; i++) d[i] = q[i] / 50;
   return d;
 }
+const packSeed = (s) => [s.x, s.y, s.z, s.w || 1, s.k || 1, s.a || 0, s.f ? 1 : 0];
+const unpackSeed = (a) => ({ x: a[0], y: a[1], z: a[2], w: a[3], k: a[4], a: a[5], f: a[6] });
 
 export class Game {
   constructor(state = null) {
@@ -69,44 +82,52 @@ export class Game {
 
   // ------------------------------------------------------------ setup
   load(s) {
-    const base = newState(s.seed);
-    this.s = Object.assign(base, s, { inv: Object.assign(base.inv, s.inv), lv: Object.assign(base.lv, s.lv), stats: Object.assign(base.stats, s.stats) });
+    const base = newState(s.seed, s.only);
+    this.s = Object.assign(base, s, {
+      inv: Object.assign(base.inv, s.inv), lv: Object.assign(base.lv, s.lv),
+      stats: Object.assign(base.stats, s.stats), settings: Object.assign(base.settings, s.settings),
+    });
     const st = this.s;
-    this.region = generateRegion(st.seed, RASTER);
+    this.region = generateRegion(st.seed, RASTER, st.only);
     this.W = RASTER;
     this.mask = this.region.mask.slice();
     this.ore = this.region.ore.slice();
     this.depth = st.depth ? decodeDepth(st.depth, RASTER * RASTER) : new Float32Array(RASTER * RASTER);
     delete st.depth;
-    if (!st.stakes) st.stakes = this.region.stakes.map(p => p.slice());
+    const seeds = st.seeds ? st.seeds.map(unpackSeed) : this.region.seeds.map(q => Object.assign({}, q));
+    delete st.seeds;
     if (!st.spouts) st.spouts = [this.region.spout.slice()];
     this.springs = [];
     for (const i of st.found) this.applyFind(i, false);
     this.tess = new Tess(RASTER, RASTER, this.mask);
-    st.stakes = st.stakes.filter(Boolean);
-    for (const [x, y] of st.stakes) this.tess.seeds.push({ x, y });
+    this.tess.seeds = seeds;
     this.tess.rebuild();
+    this.stress = new Float64Array(seeds.length + 64);
+    this.calm = new Float64Array(seeds.length + 64);
+    this.born = new Float64Array(seeds.length + 64).fill(-1e9);
     this.g = null;
     this.pile = null;
-    this.relayout(null, null);
     this.srcAcc = [];
     this.roundAcc = 0;
-    this.erodeAcc = 0;
+    this.tickAcc = 0;
     this.liveEMA = 0;
-    this.lastWave = 0;
+    this.time = 0;
     this._pv = null;
-    this.recalc();
+    this.relayout(null, null);
     return this;
   }
 
-  newRegion(seed) {
-    const keep = { sandbox: this.s.sandbox, speed: this.s.speed };
-    this.load(Object.assign(newState(seed), keep));
+  newRegion(seed, only = null) {
+    const keep = { sandbox: this.s.sandbox, speed: this.s.speed, settings: this.s.settings };
+    this.load(Object.assign(newState(seed, only), keep));
     this.emit('region');
   }
 
   serialize() {
-    const st = Object.assign({}, this.s, { stakes: this.s.stakes.filter(Boolean), depth: encodeDepth(this.depth), lastSave: Date.now() });
+    const st = Object.assign({}, this.s, {
+      seeds: this.tess.seeds.filter(Boolean).map(packSeed),
+      depth: encodeDepth(this.depth), lastSave: Date.now(),
+    });
     return JSON.stringify(st);
   }
 
@@ -119,6 +140,8 @@ export class Game {
   spoutRate() { return Math.pow(2, this.s.lv.rate) * this.relicFx('rate'); }
   valueMult() { return Math.pow(2, this.s.lv.value) * this.relicFx('value'); }
   erodeMult() { return Math.pow(2, this.s.lv.erode) * this.relicFx('erode'); }
+  brittle() { return Math.pow(2, this.s.lv.brittle); }
+  minArea() { return MIN_AREA * Math.pow(0.75, this.s.lv.fine); }
   sources() {
     const r = this.spoutRate();
     return [...this.s.spouts.map(([x, y]) => ({ x, y, rate: r })), ...this.springs.map(([x, y]) => ({ x, y, rate: r, spring: true }))];
@@ -136,6 +159,7 @@ export class Game {
   canBuy(id) {
     const it = SHOP_MAP[id];
     if (it.once && this.s[id]) return false;
+    if (it.max !== undefined && this.s.lv[id] >= it.max) return false;
     return this.s.sandbox || this.s.dust >= this.cost(id);
   }
 
@@ -145,6 +169,11 @@ export class Game {
     const s = this.tess.lab[p];
     return s >= 0 ? this.g.cellOf[s] : -1;
   }
+
+  seedOf(c) { return this.tess.seeds[this.g.slotOf[c]]; }
+  hardness(c) { const sd = this.seedOf(c); return (RECIPES[sd.z] || RECIPES.mud).hard * (sd.w > 1 ? 1.5 : 1); }
+  // Stress at which cell c cracks: harder ground and smaller cells take more.
+  crackAt(c) { return this.hardness(c) * Math.sqrt(400 / Math.max(1, this.g.area[c])); }
 
   // Per-cell value of a topple: ore makes it richer.
   cellValues(g, lab) {
@@ -170,8 +199,18 @@ export class Game {
     return drop;
   }
 
+  growSlots() {
+    const need = this.tess.seeds.length + 8;
+    if (this.stress.length >= need) return;
+    const grow = (a, fill = 0) => { const b = new Float64Array(need * 2).fill(fill); b.set(a); return b; };
+    this.stress = grow(this.stress);
+    this.calm = grow(this.calm);
+    this.born = grow(this.born, -1e9);
+  }
+
   // Rebuild the graph after the tessellation changed, carrying sand over.
   relayout(oldLab, oldG) {
+    this.growSlots();
     const g = buildGraph(this.tess);
     const pile = new Pile(g);
     if (this.pile && oldLab && oldG) {
@@ -188,7 +227,6 @@ export class Game {
     const cv = this.cellValues(g, this.tess.lab);
     this.val = cv.val;
     this.oreN = cv.oreN;
-    this.odo = new Float64Array(g.n);
     this.layoutV = (this.layoutV || 0) + 1;
     this.recalc();
   }
@@ -205,12 +243,12 @@ export class Game {
     this.raw = raw;
     this.expected = raw * this.valueMult();
     const R = this.realRate();
-    this.linger = 0;
-    for (let c = 0; c < g.n; c++) this.linger += this.u[c];
-    this.linger = R > 0 ? this.linger / R : 0;
-    // erosion per pixel per second, for each cell: topples per grain poured, spread over the cell
-    this.erodeRate = new Float64Array(g.n);
-    for (let c = 0; c < g.n; c++) this.erodeRate[c] = R > 0 && g.area[c] ? ERODE * this.erodeMult() * (this.u[c] / R) / g.area[c] * 100 : 0;
+    let tot = 0;
+    for (let c = 0; c < g.n; c++) tot += this.u[c];
+    this.linger = R > 0 ? tot / R : 0;
+    // per cell: its share of all topples
+    this.share = new Float64Array(g.n);
+    for (let c = 0; c < g.n; c++) this.share[c] = tot > 0 ? this.u[c] / tot : 0;
     this._pv = null;
   }
 
@@ -220,11 +258,11 @@ export class Game {
     dt *= st.speed;
     if (!(dt > 0)) return;
     st.played += dt;
+    this.time += dt;
     const N = this.denom();
     if (N !== this._lastN) { if (this._lastN) this.emit('denom', { N }); this._lastN = N; }
     // sources pour visible grains
-    const srcs = this.sources();
-    srcs.forEach((q, k) => {
+    this.sources().forEach((q, k) => {
       this.srcAcc[k] = (this.srcAcc[k] || 0) + q.rate / N * dt;
       const whole = Math.floor(this.srcAcc[k]);
       if (whole > 0) {
@@ -234,27 +272,30 @@ export class Game {
       }
     });
     // toppling rounds
-    this.roundAcc += dt * ROUNDS;
+    // big lands take longer for avalanches to cross: topple faster to keep up
+    this.roundAcc += dt * ROUNDS * Math.max(1, Math.min(4, this.g.n / 250));
     let rounds = Math.floor(this.roundAcc);
     this.roundAcc -= rounds;
-    rounds = Math.min(rounds, 120);
-    let liveVal = 0, wave = 0;
+    rounds = Math.min(rounds, 240);
+    let liveVal = 0;
     for (let r = 0; r < rounds; r++) {
-      const res = this.pile.round(this.val, this.odo);
+      const res = this.pile.round(this.val);
       liveVal += res.value;
       st.stats.topples += res.topples * N;
-      wave += res.wave;
       if (res.wave > st.stats.maxWave) st.stats.maxWave = res.wave;
     }
-    this.lastWave = wave;
     const live = liveVal * N * this.valueMult();
-    const a = Math.min(1, dt / 8);
-    this.liveEMA += a * (live / dt - this.liveEMA);
-    this.gain(st.survey && st.mode === 'steady' ? this.expected * dt : live);
-    // the ground wears away
-    this.erodeAcc += dt;
-    if (this.erodeAcc >= 0.25) { this.erode(this.erodeAcc); this.erodeAcc = 0; }
+    this.liveEMA += Math.min(1, dt / 8) * (live / dt - this.liveEMA);
+    this.gain(this.steady() ? this.expected * dt : live);
+    // timers
+    st.chisel = Math.min(CHISEL_MAX, st.chisel + dt / CHISEL_REGEN);
+    st.tremorCd = Math.max(0, st.tremorCd - dt);
+    // slow processes: erosion, cracking, settling
+    this.tickAcc += dt;
+    if (this.tickAcc >= 0.25) { this.slow(this.tickAcc); this.tickAcc = 0; }
   }
+
+  steady() { return this.s.survey && this.s.mode === 'steady'; }
 
   gain(x) {
     if (!(x > 0)) return;
@@ -262,22 +303,93 @@ export class Game {
     this.s.dustAll += x;
   }
 
+  slow(dt) {
+    this.erode(dt);
+    if (this.s.settings.fracture || this.s.settings.settle) this.evolve(dt);
+  }
+
   erode(dt) {
-    const { lab } = this.tess, cellOf = this.g.cellOf, rate = this.erodeRate, d = this.depth;
+    const { lab } = this.tess, g = this.g, d = this.depth;
+    const k = ERODE * this.erodeMult();
+    const rate = new Float64Array(g.n);
+    for (let c = 0; c < g.n; c++) rate[c] = g.area[c] ? k * this.share[c] / g.area[c] : 0;
     for (let p = 0; p < lab.length; p++) {
       const s = lab[p];
       if (s < 0) continue;
-      const c = cellOf[s];
+      const c = g.cellOf[s];
       if (c >= 0) d[p] += rate[c] * dt;
     }
     this.region.buried.forEach((b, i) => {
       if (this.s.found.includes(i)) return;
-      const p = this.tess.pixel(b.x, b.y);
-      if (d[p] >= b.depth) this.find(i);
+      if (d[this.tess.pixel(b.x, b.y)] >= b.depth) this.find(i);
     });
   }
 
-  // Progress of a buried thing towards the surface (0..1).
+  // Cells crack under busy sand; quiet cracked ground settles back.
+  evolve(dt) {
+    const g = this.g, st = this.s;
+    const splits = [], merges = [];
+    const minA = this.minArea(), br = this.brittle() * CRACK_RATE;
+    for (let c = 0; c < g.n; c++) {
+      const slot = g.slotOf[c];
+      const b = this.share[c];
+      if (st.settings.fracture) {
+        this.stress[slot] += b * br * dt;
+        if (g.area[c] >= minA && this.stress[slot] >= this.crackAt(c)) splits.push(c);
+      }
+      if (st.settings.settle) {
+        this.calm[slot] = b < 0.0005 ? this.calm[slot] + dt : 0;
+        if (this.tess.seeds[slot].f && this.calm[slot] > SETTLE_AFTER && g.area[c] < minA * 4) merges.push(slot);
+      }
+    }
+    if (!splits.length && !merges.length) return;
+    splits.sort((a, b) => this.stress[g.slotOf[b]] - this.stress[g.slotOf[a]]);
+    const doSplits = splits.slice(0, 4);
+    const doMerges = merges.slice(0, 2);
+    this.mutate(() => {
+      for (const c of doSplits) this.splitCell(c);
+      for (const slot of doMerges) {
+        this.tess.seeds[slot] = null;
+        this.calm[slot] = 0;
+        st.stats.merges++;
+      }
+      this.tess.rebuild();
+    });
+    if (doSplits.length) this.emit('crack', { n: doSplits.length });
+    if (doMerges.length) this.emit('settle', { n: doMerges.length });
+  }
+
+  // Split cell c in two across its long axis (no rebuild).
+  splitCell(c) {
+    const g = this.g, t = this.tess;
+    const slot = g.slotOf[c];
+    const sd = t.seeds[slot];
+    this.stress[slot] = 0;
+    const a = g.mxx[c], b = g.myy[c], h = g.mxy[c];
+    const lam = (a + b) / 2 + Math.sqrt(((a - b) / 2) ** 2 + h * h);
+    const th = 0.5 * Math.atan2(2 * h, a - b);
+    for (const f of [0.8, 0.55, 0.35]) {
+      const d = f * Math.sqrt(Math.max(1, lam));
+      const x1 = g.cx[c] + Math.cos(th) * d, y1 = g.cy[c] + Math.sin(th) * d;
+      const x2 = g.cx[c] - Math.cos(th) * d, y2 = g.cy[c] - Math.sin(th) * d;
+      if (!t.canSeed(x1, y1, 3, slot) || !t.canSeed(x2, y2, 3, slot)) continue;
+      // children keep the ground's character; boulders crack into smaller boulders
+      const w = sd.w > 1 ? Math.max(1, sd.w * 0.8) : 1;
+      const child = (x, y) => ({ x, y, z: sd.z, w, k: sd.k, a: sd.a, f: 1 });
+      t.seeds[slot] = child(x1, y1);
+      let ns = t.seeds.indexOf(null);
+      if (ns < 0) ns = t.seeds.length;
+      t.seeds[ns] = child(x2, y2);
+      this.growSlots();
+      this.stress[ns] = 0; this.calm[ns] = 0; this.calm[slot] = 0;
+      this.born[slot] = this.time; this.born[ns] = this.time;
+      this.s.stats.splits++;
+      this._lastSplit = [slot, ns];
+      return true;
+    }
+    return false;
+  }
+
   buriedProgress(i) {
     const b = this.region.buried[i];
     return Math.min(1, this.depth[this.tess.pixel(b.x, b.y)] / b.depth);
@@ -304,17 +416,14 @@ export class Game {
     else if (b.kind === 'cave') disc(b.r, (p) => { if (this.mask[p] === FREE) this.mask[p] = CRACK; });
     if (!live) return;
     if (b.kind === 'cave') {
-      // stakes and spouts that fell in go back to your pocket
-      this.s.stakes.forEach((q, k) => {
-        if (!q) return;
-        if (this.mask[this.tess.pixel(q[0], q[1])] !== FREE) { this.s.stakes[k] = null; this.tess.seeds[k] = null; this.s.inv.stake++; }
-      });
+      const t = this.tess;
+      t.seeds.forEach((q, k) => { if (q && this.mask[t.pixel(q.x, q.y)] !== FREE) t.seeds[k] = null; });
       this.s.spouts = this.s.spouts.filter(([x, y]) => {
-        if (this.mask[this.tess.pixel(x, y)] === FREE) return true;
+        if (this.mask[t.pixel(x, y)] === FREE) return true;
         this.s.inv.spout++;
         return false;
       });
-      this.mutate(() => this.tess.rebuild());
+      this.mutate(() => t.rebuild());
     } else if (b.kind === 'ore') {
       const cv = this.cellValues(this.g, this.tess.lab);
       this.val = cv.val; this.oreN = cv.oreN;
@@ -325,10 +434,16 @@ export class Game {
   offline(sec) {
     if (!(sec > 5)) return null;
     sec = Math.min(sec, 8 * 3600);
-    const before = this.s.dust, found = this.s.found.length;
+    const before = this.s.dust, found = this.s.found.length, splits = this.s.stats.splits;
     this.gain(this.expected * sec);
-    this.erode(sec);
-    return { sec, dust: this.s.dust - before, finds: this.s.found.length - found };
+    // the land keeps shaping itself, a step at a time
+    for (let t = 0; t < sec;) {
+      const step = Math.min(30, sec - t);
+      this.slow(step);
+      t += step;
+      if (this.s.stats.splits - splits > 400) break;
+    }
+    return { sec, dust: this.s.dust - before, finds: this.s.found.length - found, splits: this.s.stats.splits - splits };
   }
 
   // ------------------------------------------------------------ actions
@@ -358,31 +473,44 @@ export class Game {
     if (c < 0) return false;
     this.pile.grains[c] += 1;
     this.s.stats.clicks++;
-    if (this.s.survey && this.s.mode === 'steady') this.gain(this.denom() * this.v[c] * this.valueMult());
+    if (this.steady()) this.gain(this.denom() * this.v[c] * this.valueMult());
     return true;
   }
 
-  placeStake(x, y) {
-    if (this.s.inv.stake <= 0 && !this.s.sandbox) return false;
-    if (!this.tess.canSeed(x, y, GAP)) return false;
+  // The Chisel: crack a cell of your choosing (a few charges, slowly regained).
+  chisel(x, y) {
+    const c = this.cellAt(x, y);
+    if (c < 0) return 'none';
+    if (this.s.chisel < 1 && !this.s.sandbox) return 'empty';
+    if (this.g.area[c] < this.minArea()) return 'small';
+    let ok = false;
+    this.mutate(() => { ok = this.splitCell(c); this.tess.rebuild(); });
+    if (!ok) return 'small';
+    if (!this.s.sandbox) this.s.chisel -= 1;
+    return 'ok';
+  }
+
+  // A Tremor: shake every seed a little and load the pile, for one big avalanche.
+  tremor() {
+    if (this.s.tremorCd > 0 && !this.s.sandbox) return false;
+    const t = this.tess, R = this.rng;
     this.mutate(() => {
-      const slot = this.tess.add(x, y);
-      this.s.stakes[slot] = [x, y];
+      t.seeds.forEach((q, k) => {
+        if (!q) return;
+        const x = q.x + (R() - 0.5) * 5, y = q.y + (R() - 0.5) * 5;
+        if (t.canSeed(x, y, 3, k)) t.seeds[k] = Object.assign({}, q, { x, y, _c: undefined });
+      });
+      t.rebuild();
     });
-    if (!this.s.sandbox) this.s.inv.stake--;
-    return true;
-  }
-
-  moveStake(slot, x, y) {
-    if (!this.tess.canSeed(x, y, GAP, slot)) return false;
-    this.mutate(() => { this.tess.move(slot, x, y); this.s.stakes[slot] = [x, y]; });
-    return true;
-  }
-
-  pocketStake(slot) {
-    if (this.s.stakes.filter(Boolean).length <= 2) return false;
-    this.mutate(() => { this.tess.remove(slot); this.s.stakes[slot] = null; });
-    this.s.inv.stake++;
+    const g = this.g, pile = this.pile;
+    let added = 0;
+    for (let c = 0; c < g.n; c++) {
+      if (R() < 0.6) { const k = Math.max(0, g.thr[c] - 1 - pile.grains[c]); pile.grains[c] += k; added += k * this.v[c]; }
+    }
+    for (let k = 0; k < 6; k++) { const c = Math.floor(R() * g.n); pile.grains[c] += 1; added += this.v[c]; }
+    if (this.steady()) this.gain(added * this.denom() * this.valueMult());
+    this.s.tremorCd = TREMOR_CD;
+    this.emit('tremor');
     return true;
   }
 
@@ -403,6 +531,7 @@ export class Game {
   }
 
   pocketSpout(k) {
+    if (this.s.spouts.length <= 1) return false;
     this.s.spouts.splice(k, 1);
     this.s.inv.spout++;
     this.recalc();
@@ -415,41 +544,7 @@ export class Game {
     return best;
   }
 
-  // Lloyd relaxation: move every stake to the middle of its cell.
-  relax() {
-    this.mutate(() => {
-      const g = this.g;
-      for (let c = 0; c < g.n; c++) {
-        const slot = g.slotOf[c];
-        const x = g.cx[c], y = g.cy[c];
-        if (this.tess.canSeed(x, y, GAP, slot)) { this.tess.seeds[slot] = { x, y }; this.s.stakes[slot] = [x, y]; }
-      }
-      this.tess.rebuild();
-    });
-  }
-
   // ------------------------------------------------------------ previews
-  // What would a stake here (or the stake `slot` moved here) do?
-  previewStake(x, y, slot = -1) {
-    const key = `s:${Math.round(x * 2)}:${Math.round(y * 2)}:${slot}:${this.layoutV}:${this.s.spouts.length}`;
-    if (this._pv && this._pv.key === key) return this._pv.res;
-    let res;
-    if (!this.tess.canSeed(x, y, GAP, slot)) res = { ok: false };
-    else {
-      const t = this.tess.clone();
-      const s = slot >= 0 ? (t.move(slot, x, y), slot) : t.add(x, y);
-      const g = buildGraph(t);
-      const { val } = this.cellValues(g, t.lab);
-      const v = solve(g, val);
-      const drop = this.dropFor(g, t);
-      let raw = 0;
-      for (let c = 0; c < g.n; c++) raw += drop[c] * v[c];
-      res = { ok: true, ratio: this.raw > 0 ? raw / this.raw : 1, tess: t, slot: s, cell: g.cellOf[s], g };
-    }
-    this._pv = { key, res };
-    return res;
-  }
-
   previewSpout(x, y, k = -1) {
     const c = this.cellAt(x, y);
     if (c < 0) return { ok: false };
@@ -457,5 +552,33 @@ export class Game {
     let raw = this.raw + rate * this.v[c];
     if (k >= 0) { const o = this.cellAt(this.s.spouts[k][0], this.s.spouts[k][1]); if (o >= 0) raw -= rate * this.v[o]; }
     return { ok: true, ratio: this.raw > 0 ? raw / this.raw : 1 };
+  }
+
+  // What would chiselling the cell under (x, y) do?
+  previewChisel(x, y) {
+    const c = this.cellAt(x, y);
+    const key = `c:${c}:${this.layoutV}`;
+    if (this._pv && this._pv.key === key) return this._pv.res;
+    let res = { ok: false, cell: c };
+    if (c >= 0 && this.g.area[c] >= this.minArea()) {
+      const t = this.tess;
+      const saved = t.seeds.slice();
+      const savedLab = Int32Array.from(t.lab), savedDist = Float64Array.from(t.dist);
+      const st = { stress: this.stress[this.g.slotOf[c]], splits: this.s.stats.splits, born: this.born.slice() };
+      if (this.splitCell(c)) {
+        t.rebuild();
+        const g = buildGraph(t);
+        const { val } = this.cellValues(g, t.lab);
+        const v = solve(g, val);
+        const drop = this.dropFor(g, t);
+        let raw = 0;
+        for (let k = 0; k < g.n; k++) raw += drop[k] * v[k];
+        res = { ok: true, cell: c, ratio: this.raw > 0 ? raw / this.raw : 1, lab: Int32Array.from(t.lab), slots: this._lastSplit };
+      }
+      t.seeds = saved; t.lab.set(savedLab); t.dist.set(savedDist);
+      this.stress[this.g.slotOf[c]] = st.stress; this.s.stats.splits = st.splits; this.born = st.born;
+    }
+    this._pv = { key, res };
+    return res;
   }
 }
