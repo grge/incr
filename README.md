@@ -62,6 +62,18 @@ fourth hour. (Timings are from the balance bot; see below.)
   right-click, to put them back in your pocket.
 - Keys: **Q** quake · **S** survey · **1–3** switch tables · **Esc** cancel.
 
+## Watershed prototype
+
+**Try it:** https://grge.github.io/incr/proto/
+
+An early prototype of the next version: one region whose cells are a Voronoi
+diagram you shape by driving stakes. Rock walls and cracks constrain the
+cells; the sandpile runs on whatever graph you build (a cell topples when it
+holds as many grains as it has ways out); sand wears the ground away and
+uncovers what is buried; and the Survey switches scoring from the live
+sandpile to its exact steady-state average. It has a sandbox panel for
+experimenting. Code is in `proto/` (`node proto/tools/test.mjs` runs its tests).
+
 ## Running locally
 
 It is a static site with no build step. Serve the folder with any web server

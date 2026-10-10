@@ -21,14 +21,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Test the game logic
-        run: node tools/test.mjs
+        run: node tools/test.mjs && node proto/tools/test.mjs
 
       - name: Publish to gh-pages
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p _site
-          cp -r index.html css js _site/
+          cp -r index.html css js proto _site/
           touch _site/.nojekyll
           cd _site
           git init -q -b gh-pages
