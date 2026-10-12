@@ -182,3 +182,5 @@ test('saves round-trip the shaped land', () => {
 });
 
 console.log(`${passed} tests passed`);
+
+await import('./war_test.mjs');

@@ -91,6 +91,24 @@ from the live sandpile until the Survey switches it to the exact
 steady-state average. There is a sandbox panel for experimenting. Code is in
 `proto/` (`node proto/tools/test.mjs` runs its tests).
 
+## Skirmish prototype
+
+**Try it:** https://grge.github.io/incr/proto/war/
+
+The same land as a 1v1 strategy game against a bot. You are gold and the
+rival is blue. Every cell belongs to a player or to no one and holds sand of
+its owner's colour. Cells topple as usual, and a grain landing on someone
+else's cell destroys one of theirs (landing on an empty cell takes it), so
+fronts form and fight on their own. Spouts are fixed: whoever holds the cell
+under one pours through it. Your total flow grows with the cells you own and
+is shared between your spouts, and each spout you hold gives pull for wells.
+A well on your land swallows nearby cells that aren't yours, sand and all,
+packing them in as yours. Lift it and those cells burst out over the front,
+landing among the enemy full of sand. Win with 80% of the cells, or by
+leaving the rival with no spouts. The map is point-symmetric, so both sides
+start equal. Code is in `proto/war/` (`node proto/tools/war_test.mjs` runs
+its tests).
+
 ## Running locally
 
 It is a static site with no build step. Serve the folder with any web server

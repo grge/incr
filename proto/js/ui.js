@@ -449,6 +449,7 @@ export class UI {
     ));
     panel.appendChild(h('div', { class: 'btn-row' }, h('button', { class: 'btn warn', onclick: () => this.hooks.reset() }, 'Reset everything')));
     panel.appendChild(h('p', { class: 'note' }, 'Keys: 1 pour · 2 tap · 3 weight · 4 comb · +/− adjust the selected tap or weight · Delete removes it · Esc cancel.'));
+    panel.appendChild(h('p', { class: 'note' }, h('a', { href: 'war/' }, 'Try the skirmish prototype: the same land, two players →')));
     this.buildSel();
   }
 

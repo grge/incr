@@ -1,0 +1,23 @@
+/* Skirmish additions on top of the prototype's base styles. */
+:root { --you: #e8b86a; --rival: #7fb0f4; }
+.you { color: var(--you); } .rival { color: var(--rival); }
+#score { flex: 1; min-width: 260px; max-width: 620px; display: flex; flex-direction: column; gap: 4px; }
+#score .sides { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-variant-numeric: tabular-nums; }
+#score .sides > span:first-child, #score .sides > span:last-child { font-weight: 600; }
+#score .sides.small > span { font-weight: 400; }
+#bar { position: relative; height: 12px; border-radius: 6px; background: #3a342e; overflow: hidden; }
+#barYou { position: absolute; left: 0; top: 0; bottom: 0; background: var(--you); transition: width 0.3s; }
+#barRival { position: absolute; right: 0; top: 0; bottom: 0; background: var(--rival); transition: width 0.3s; }
+#mark { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: rgba(255,255,255,0.35); }
+#clock { min-width: 120px; text-align: right; font-variant-numeric: tabular-nums; }
+#sel { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; font-size: 13px; font-variant-numeric: tabular-nums; }
+#sel .tool { padding: 3px 10px; }
+#sel .tool.lift { color: var(--you); border-color: #6d5531; }
+.sel-name { font-weight: 600; }
+.sel-name.you { color: var(--you); } .sel-name.rival { color: var(--rival); }
+.reveal h2.win { color: var(--you); } .reveal h2.lose { color: var(--rival); }
+.stats.end { grid-template-columns: 1fr auto auto; text-align: right; margin-top: 10px; }
+.stats.end .k { text-align: left; }
+.stats.end .k.you, .stats.end .k.rival { text-align: right; font-weight: 600; }
+.about a, .note a { color: var(--glass); }
+@media (max-width: 900px) { #clock { min-width: 0; text-align: left; } }

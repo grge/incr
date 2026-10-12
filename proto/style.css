@@ -76,3 +76,4 @@ select.seed { width: auto; }
 #sel .tool { padding: 3px 10px; }
 .sel-name { font-weight: 600; }
 .sel-name.tap { color: var(--sand); } .sel-name.weight { color: #b98cff; }
+.note a, .about a { color: var(--glass); }
