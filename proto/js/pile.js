@@ -13,37 +13,46 @@ export class Pile {
   // Start close to the critical state, so avalanches begin straight away.
   fill(rng) {
     const { thr } = this.g;
-    for (let c = 0; c < this.g.n; c++) this.grains[c] = Math.max(0, thr[c] - 1 - (rng() < 0.45 ? 1 : 0));
+    for (let c = 0; c < this.g.n; c++) { const r = rng(); this.grains[c] = Math.max(0, thr[c] - (r < 0.2 ? 1 : r < 0.5 ? 2 : 3)); }
   }
 
-  // Carry grains over from another pile through a cell mapping.
+  // Carry grains over from another pile through a cell mapping. When an old
+  // cell becomes several new ones its grains are shared out, not copied.
   inherit(old, map) {
     const { thr } = this.g;
+    const cnt = new Int32Array(old.grains.length), seen = new Int32Array(old.grains.length);
+    for (let c = 0; c < this.g.n; c++) if (map[c] >= 0 && map[c] < cnt.length) cnt[map[c]]++;
     for (let c = 0; c < this.g.n; c++) {
       const o = map[c];
-      this.grains[c] = o >= 0 && o < old.grains.length ? Math.min(old.grains[o], thr[c] - 1) : Math.max(0, thr[c] - 2);
+      if (o >= 0 && o < cnt.length) {
+        const k = cnt[o], have = old.grains[o];
+        const mine = Math.floor(have / k) + (seen[o]++ < have % k ? 1 : 0);
+        this.grains[c] = Math.min(mine, 2 * thr[c]);   // avalanches in progress carry on
+      } else this.grains[c] = Math.max(0, Math.floor((thr[c] - 1) / 2));
     }
   }
 
-  // One synchronous round. Returns {topples, value, wave, toppled[]}.
-  round(val, odo) {
+  // One synchronous round. Returns {topples, value, value2, wave}; value2
+  // totals a second per-topple value (val2) when one is given.
+  round(val, odo, val2 = null) {
     const { n, thr, nbrStart, nbr } = this.g;
     const g = this.grains, K = this.K, act = this.act;
     let m = 0;
     for (let c = 0; c < n; c++) {
       if (g[c] >= thr[c] && thr[c] > 0) { K[c] = Math.floor(g[c] / thr[c]); act[m++] = c; }
     }
-    let topples = 0, value = 0;
+    let topples = 0, value = 0, value2 = 0;
     for (let j = 0; j < m; j++) {
       const c = act[j], k = K[c];
       g[c] -= k * thr[c];
       for (let e = nbrStart[c]; e < nbrStart[c + 1]; e++) g[nbr[e]] += k;
       topples += k;
       value += k * val[c];
+      if (val2) value2 += k * val2[c];
       if (odo) odo[c] += k;
       this.flash[c] = 1;
     }
-    return { topples, value, wave: m };
+    return { topples, value, value2, wave: m };
   }
 }
 

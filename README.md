@@ -66,18 +66,30 @@ fourth hour. (Timings are from the balance bot; see below.)
 
 **Try it:** https://grge.github.io/incr/proto/
 
-An early prototype of the next version: one region of ground that shapes
-itself. Each region is a patchwork of Voronoi "recipes" — basalt columns,
-mudflats, wind-stretched dunes, boulder fields, terraces, and often a river
-channel walled in by rock. The sandpile runs on the resulting graph (a cell
-topples when it holds as many grains as it has ways out). Cells crack in two
-where sand is busiest, so the land grows finer around your spouts; cracked
-ground that sand stops reaching settles back together. Sand also wears the
-ground away and uncovers what is buried. You choose where to pour, upgrade,
-chisel a cell now and then, or set off a tremor. Income comes from the live
-sandpile until the Survey switches it to the exact steady-state average.
-There is a sandbox panel for experimenting. Code is in `proto/`
-(`node proto/tools/test.mjs` runs its tests).
+An early prototype of the next version, about shaping the space sand moves
+through. The sandpile runs on a Voronoi graph (a cell topples when it holds
+as many grains as it has ways out), and how finely the ground is divided
+works like depth: where cells are small, a grain needs many topples to get
+anywhere, so sand lingers in a well. You don't place cells. You place:
+
+- **Taps**, which share one flow budget between them (wheel or +/− to pour
+  more at one, less at the others).
+- **Weights**, which share one pull budget. Each one raises the target cell
+  density around it, and the cells relax towards that density (weighted
+  Lloyd relaxation, plus mass balancing that lets a well swallow cells from
+  far away). The number of cells stays the same, so a deep well thins the
+  ground elsewhere.
+- **The comb**, brush strokes that stretch cells along a direction.
+
+Crowded cells (high *pressure*) press out gems as well as dust; gems buy more
+pull and more ground. The **Wells** view draws depth contours of the
+steady-state value field. Each region is a patchwork of ground recipes
+expressed as density and stretch fields (basalt, mudflats, wind-stretched
+dunes, boulder fields, terraces), often with a river channel walled in by
+rock. Sand wears the ground away and uncovers what is buried. Income comes
+from the live sandpile until the Survey switches it to the exact
+steady-state average. There is a sandbox panel for experimenting. Code is in
+`proto/` (`node proto/tools/test.mjs` runs its tests).
 
 ## Running locally
 

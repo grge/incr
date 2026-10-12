@@ -70,3 +70,9 @@ input.seed { width: 110px; background: var(--bg2); border: 1px solid var(--line2
 select.seed { width: auto; }
 .tool.tremor { color: var(--warn); border-color: #6d3f2f; }
 .tool:disabled { opacity: 0.5; cursor: default; }
+.cur.gem .cur-icon, .cur.gem .rate { color: #c99bff; }
+.btn.buy.gems { color: #c99bff; }
+#sel { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; font-size: 13px; font-variant-numeric: tabular-nums; }
+#sel .tool { padding: 3px 10px; }
+.sel-name { font-weight: 600; }
+.sel-name.tap { color: var(--sand); } .sel-name.weight { color: #b98cff; }

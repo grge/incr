@@ -1,8 +1,9 @@
 // Seeded generation of one region. The ground is a patchwork of zones, each
-// scattering its Voronoi seeds by a different recipe (basalt columns,
-// mudflats, dunes, boulder fields, terraces); some regions have a river
-// channel walled in by rock. Rock outcrops and ridges are walls, cracks are
-// holes, and things are buried at depth.
+// a different recipe (basalt columns, mudflats, dunes, boulder fields,
+// terraces) expressed as fields: how densely the ground wants to be divided,
+// and which way it is stretched. Some regions have a river channel walled in
+// by rock (its cells are pinned). Rock outcrops and ridges are walls, cracks
+// are holes, and things are buried at depth.
 import { FREE, ROCK, CRACK, OUT } from './voronoi.js';
 
 export function mulberry32(a) {
@@ -16,14 +17,15 @@ export function mulberry32(a) {
 
 // hard: how much stress a cell takes before it cracks; tint: colour shift
 export const RECIPES = {
-  mud: { name: 'Mudflats', desc: 'Cracked ground: cells of every size. Cracks easily.', hard: 0.7, tint: [12, 2, -10] },
-  basalt: { name: 'Basalt', desc: 'Columns of even, near-hexagonal cells. Hard to crack.', hard: 1.4, tint: [-16, -12, -4] },
+  mud: { name: 'Mudflats', desc: 'Cracked ground: cells of every size.', hard: 0.7, tint: [12, 2, -10] },
+  basalt: { name: 'Basalt', desc: 'Even, near-hexagonal columns.', hard: 1.4, tint: [-16, -12, -4] },
   dunes: { name: 'Dunes', desc: 'Long cells stretched by the wind.', hard: 0.9, tint: [18, 12, 0] },
   boulders: { name: 'Boulder field', desc: 'A few huge cells among fine gravel.', hard: 1.0, tint: [8, -8, -12] },
   terraces: { name: 'Terraces', desc: 'Bands of fine cells between bands of coarse ones.', hard: 1.0, tint: [-6, 6, -8] },
   river: { name: 'River', desc: 'A channel walled in by rock, running to the edge.', hard: 0.8, tint: [-10, 0, 14] },
 };
 export const RECIPE_IDS = ['mud', 'basalt', 'dunes', 'boulders', 'terraces'];
+export const COMB = 64;   // resolution of the stretch ("comb") field
 
 // A wobbly closed curve: radius as a function of angle.
 function wobble(R, base, amp, terms = 4) {
@@ -46,7 +48,7 @@ export const BURIED_KINDS = {
 export const RELICS = [
   { id: 'lens', name: 'Cracked Lens', desc: 'Every topple is worth twice as much.', fx: { value: 2 } },
   { id: 'trowel', name: 'Brass Trowel', desc: 'Sand wears the ground away twice as fast.', fx: { erode: 2 } },
-  { id: 'shell', name: 'Spiral Shell', desc: 'Spouts pour twice as fast.', fx: { rate: 2 } },
+  { id: 'shell', name: 'Spiral Shell', desc: 'Taps pour twice as fast.', fx: { rate: 2 } },
   { id: 'coin', name: 'Old Coin', desc: 'Every topple is worth three times as much.', fx: { value: 3 } },
   { id: 'map', name: 'Folded Map', desc: 'Shows where everything is buried.', fx: { reveal: 1 } },
 ];
@@ -160,7 +162,7 @@ export function generateRegion(seed, W, only = null) {
   for (let k = 0; k < nz; k++) {
     const [x, y] = k === 0 ? [C + (R() - 0.5) * 20, C + (R() - 0.5) * 20] : randomFree(W * 0.18, W * 0.4);
     const recipe = only || ids.splice(Math.floor(R() * ids.length), 1)[0] || RECIPE_IDS[Math.floor(R() * RECIPE_IDS.length)];
-    zones.push({ x, y, recipe, a: R() * Math.PI });
+    zones.push({ x, y, recipe, a: R() * Math.PI, ph: R() * 6, ph2: R() * 6 });
   }
   const zone = new Uint8Array(n);
   const wf = [R() * 6, R() * 6, R() * 6, R() * 6];
@@ -172,73 +174,41 @@ export function generateRegion(seed, W, only = null) {
     zone[y * W + x] = best;
   }
 
-  // ---- seeds, recipe by recipe
-  const MIN = 6;
-  const near = (x, y, r) => seeds.some(s => (s.x - x) ** 2 + (s.y - y) ** 2 < r * r);
-  const tryAdd = (zi, sd, gap = MIN) => {
-    const p = at(Math.floor(sd.x), Math.floor(sd.y));
-    if (p < 0 || mask[p] !== FREE || river[p] || zone[p] !== zi) return false;
-    if (near(sd.x, sd.y, gap)) return false;
-    seeds.push(sd);
-    return true;
-  };
-  const lattice = (zi, a, dx, dy, shift, jitter, make) => {
-    const ca = Math.cos(a), sa = Math.sin(a);
-    const span = W;
-    for (let j = -span / dy; j <= span / dy; j++) {
-      for (let i = -span / dx; i <= span / dx; i++) {
-        let u = i * dx + (j % 2 ? shift : 0), v = j * dy;
-        u += (R() - 0.5) * jitter; v += (R() - 0.5) * jitter;
-        const x = C + u * ca - v * sa, y = C + u * sa + v * ca;
-        if (x < 0 || y < 0 || x >= W || y >= H) continue;
-        tryAdd(zi, make(x, y, j));
-      }
-    }
-  };
+  // ---- each recipe is a field: how dense the ground is, and which way it is stretched
+  const rho0 = new Float32Array(n).fill(1);
+  const comb = new Float32Array(COMB * COMB * 2);
+  const boulderSpots = [];
   zones.forEach((z, zi) => {
-    const r = z.recipe;
-    if (r === 'basalt') lattice(zi, z.a, 22, 19, 11, 2, (x, y) => ({ x, y, z: r }));
-    else if (r === 'dunes') lattice(zi, z.a, 34, 13, 17, 4, (x, y) => ({ x, y, z: r, k: 2, a: z.a }));
-    else if (r === 'terraces') {
-      // rows across the slope: alternately fine and coarse
-      const ca = Math.cos(z.a), sa = Math.sin(z.a);
-      let v = -W;
-      let fine = true;
-      while (v < W) {
-        const step = fine ? 11 : 30, along = fine ? 14 : 30;
-        for (let u = -W; u < W; u += along) {
-          const uu = u + (R() - 0.5) * 4;
-          tryAdd(zi, { x: C + uu * ca - v * sa, y: C + uu * sa + v * ca, z: r });
-        }
-        v += step;
-        fine = !fine;
-      }
-    } else if (r === 'boulders') {
-      for (let k = 0; k < 400; k++) {
-        const x = R() * W, y = R() * H;
-        if (zone[at(Math.floor(x), Math.floor(y))] === zi && !near(x, y, 70)) tryAdd(zi, { x, y, z: r, w: 2.6, boulder: true }, 30);
-      }
-      const boulders = seeds.filter(q => q.boulder);
-      for (let k = 0; k < 3000; k++) {
-        const x = R() * W, y = R() * H;
-        if (boulders.some(b => (b.x - x) ** 2 + (b.y - y) ** 2 < 32 * 32)) continue;
-        tryAdd(zi, { x, y, z: r }, 15);
-      }
-    } else {
-      // mudflats: dart throwing with a spacing that varies across the ground
-      const ph = R() * 6;
-      for (let k = 0; k < 4000; k++) {
-        const x = R() * W, y = R() * H;
-        const sp = 13 + 16 * (0.5 + 0.5 * Math.sin(x / 31 + ph) * Math.cos(y / 27 - ph));
-        tryAdd(zi, { x, y, z: r }, sp);
-      }
+    if (z.recipe !== 'boulders') return;
+    for (let k = 0; k < 300 && boulderSpots.length < 40; k++) {
+      const x = R() * W, y = R() * H;
+      const p = at(Math.floor(x), Math.floor(y));
+      if (p >= 0 && zone[p] === zi && mask[p] === FREE && !river[p] && boulderSpots.every(b => Math.hypot(b[0] - x, b[1] - y) > 46)) boulderSpots.push([x, y, 13 + R() * 9]);
     }
   });
-  // every free pocket gets at least one seed
-  for (let k = 0; k < 2000; k++) {
-    const x = R() * W, y = R() * H;
-    const p = at(Math.floor(x), Math.floor(y));
-    if (p >= 0 && mask[p] === FREE && !near(x, y, 24)) seeds.push({ x, y, z: river[p] ? 'river' : zones[zone[p]].recipe });
+  // each boulder is one big pinned cell with a head start over its neighbours
+  for (const [bx, by, br] of boulderSpots) seeds.push({ x: bx, y: by, z: 'boulder', w: 1 + br / 12 });
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const p = y * W + x;
+    const z = zones[zone[p]];
+    let r = 1;
+    if (z.recipe === 'mud') r = 0.45 + 1.1 * (0.5 + 0.5 * Math.sin(x / 23 + z.ph) * Math.cos(y / 19 + z.ph2));
+    else if (z.recipe === 'terraces') {
+      const v = -x * Math.sin(z.a) + y * Math.cos(z.a);
+      r = Math.sin(v / 17 + z.ph) > 0 ? 2.2 : 0.55;
+    } else if (z.recipe === 'boulders') {
+      r = 1.4;
+      for (const [bx, by, br] of boulderSpots) if ((bx - x) ** 2 + (by - y) ** 2 < br * br) { r = 0.06; break; }
+    }
+    rho0[p] = r;
+  }
+  for (let gy = 0; gy < COMB; gy++) for (let gx = 0; gx < COMB; gx++) {
+    const x = Math.min(W - 1, Math.floor((gx + 0.5) * W / COMB)), y = Math.min(H - 1, Math.floor((gy + 0.5) * H / COMB));
+    const z = zones[zone[y * W + x]];
+    if (z.recipe !== 'dunes') continue;
+    const k = (gy * COMB + gx) * 2;
+    comb[k] = Math.cos(2 * z.a) * 1.1;
+    comb[k + 1] = Math.sin(2 * z.a) * 1.1;
   }
 
   // ---- surface ore
@@ -268,5 +238,5 @@ export function generateRegion(seed, W, only = null) {
   bury('ore', W * 0.2, W * 0.4, 6, { r: 11 });
   bury('cave', W * 0.12, W * 0.32, 5, { r: 7 });
 
-  return { W, H, mask, ore, river, zone, zones, seeds, buried, spout: [C + 0.5, C + 0.5] };
+  return { W, H, mask, ore, river, zone, zones, rho0, comb, seeds, buried, spout: [C + 0.5, C + 0.5] };
 }

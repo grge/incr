@@ -4,7 +4,7 @@ import { View } from './view.js';
 import { UI } from './ui.js';
 import { fmt, fmtTime } from '../../js/format.js';
 
-const KEY = 'topple.proto.v2';
+const KEY = 'topple.proto.v3';
 let resetting = false;
 
 function save(game) {
@@ -32,7 +32,7 @@ const ui = new UI(game, view, {
   },
 });
 ui.init();
-if (away && away.dust > 0) ui.toast('While you were away', `${fmtTime(away.sec)}: +${fmt(away.dust)} dust${away.finds ? `, and ${away.finds} thing${away.finds > 1 ? 's' : ''} uncovered` : ''}.`, 'good');
+if (away && away.dust > 0) ui.toast('While you were away', `${fmtTime(away.sec)}: +${fmt(away.dust)} dust${away.gems >= 1 ? `, +${fmt(away.gems)} gems` : ''}${away.finds ? `, and ${away.finds} thing${away.finds > 1 ? 's' : ''} uncovered` : ''}.`, 'good');
 
 let last = performance.now(), saveAcc = 0;
 function step(now) {

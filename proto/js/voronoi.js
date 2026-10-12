@@ -66,6 +66,42 @@ class Heap {
   }
 }
 
+// Bucket queue keyed by distance (to 1/8 px): much faster than a heap for
+// growing every cell at once.
+const BQ_RES = 8, BQ_OFF = 64;
+class Buckets {
+  constructor(cap) {
+    this.head = new Int32Array(8192).fill(-1);
+    this.next = new Int32Array(cap);
+    this.val = new Int32Array(cap);
+    this.n = 0;
+    this.cur = 0;
+    this.max = -1;
+  }
+  reset() { if (this.max >= 0) this.head.fill(-1, 0, this.max + 1); this.n = 0; this.cur = 0; this.max = -1; }
+  push(d, v) {
+    let b = Math.floor((d + BQ_OFF) * BQ_RES);
+    if (b < 0) b = 0; else if (b >= this.head.length) b = this.head.length - 1;
+    if (this.n === this.val.length) {
+      const nx = new Int32Array(this.n * 2), vv = new Int32Array(this.n * 2);
+      nx.set(this.next); vv.set(this.val); this.next = nx; this.val = vv;
+    }
+    const e = this.n++;
+    this.val[e] = v; this.next[e] = this.head[b]; this.head[b] = e;
+    if (b < this.cur) this.cur = b;
+    if (b > this.max) this.max = b;
+  }
+  // next value, or -1 when empty
+  pop() {
+    while (this.cur <= this.max) {
+      const e = this.head[this.cur];
+      if (e >= 0) { this.head[this.cur] = this.next[e]; return this.val[e]; }
+      this.cur++;
+    }
+    return -1;
+  }
+}
+
 export class Tess {
   constructor(W, H, mask) {
     this.W = W; this.H = H; this.mask = mask;
@@ -73,6 +109,7 @@ export class Tess {
     this.dist = new Float64Array(W * H).fill(Infinity);
     this.seeds = [];      // slot -> {x, y} or null
     this.heap = new Heap();
+    this.bq = new Buckets(W * H * 2);
   }
 
   clone() {
@@ -155,11 +192,35 @@ export class Tess {
   }
 
   rebuild() {
-    this.lab.fill(-1);
-    this.dist.fill(Infinity);
-    this.heap.n = 0;
-    for (let s = 0; s < this.seeds.length; s++) if (this.seeds[s]) this._claim(s);
-    this._grow();
+    const { W, H, mask, lab, dist, seeds, bq } = this;
+    lab.fill(-1);
+    dist.fill(Infinity);
+    bq.reset();
+    for (let s = 0; s < seeds.length; s++) {
+      const sd = seeds[s];
+      if (!sd) continue;
+      const p = this.pixel(sd.x, sd.y);
+      if (p < 0 || mask[p] !== FREE) continue;
+      const d = seedDist(sd, (p % W) + 0.5, ((p / W) | 0) + 0.5);
+      if (d < dist[p]) { dist[p] = d; lab[p] = s; bq.push(d, p); }
+    }
+    // grow every cell at once, nearest pixels first
+    const done = new Uint8Array(W * H);
+    for (let p = bq.pop(); p >= 0; p = bq.pop()) {
+      if (done[p]) continue;
+      done[p] = 1;
+      const s = lab[p], sd = seeds[s];
+      const x = p % W, y = (p / W) | 0;
+      for (let k = 0; k < 4; k++) {
+        const nx = x + (k === 0 ? 1 : k === 1 ? -1 : 0);
+        const ny = y + (k === 2 ? 1 : k === 3 ? -1 : 0);
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const q = ny * W + nx;
+        if (done[q] || mask[q] !== FREE) continue;
+        const nd = seedDist(sd, nx + 0.5, ny + 0.5);
+        if (nd < dist[q] - 1e-9) { dist[q] = nd; lab[q] = s; bq.push(nd, q); }
+      }
+    }
   }
 
   // Changes always rebuild from scratch (about 20 ms): the cells are then a
