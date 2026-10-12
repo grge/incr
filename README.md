@@ -95,18 +95,24 @@ steady-state average. There is a sandbox panel for experimenting. Code is in
 
 **Try it:** https://grge.github.io/incr/proto/war/
 
-The same land as a 1v1 strategy game against a bot. You are gold and the
-rival is blue. Every cell belongs to a player or to no one and holds sand of
-its owner's colour. Cells topple as usual, and a grain landing on someone
-else's cell destroys one of theirs (landing on an empty cell takes it), so
-fronts form and fight on their own. Spouts are fixed: whoever holds the cell
-under one pours through it. Your total flow grows with the cells you own and
-is shared between your spouts, and each spout you hold gives pull for wells.
-A well on your land swallows nearby cells that aren't yours, sand and all,
-packing them in as yours. Lift it and those cells burst out over the front,
-landing among the enemy full of sand. Win with 80% of the cells, or by
-leaving the rival with no spouts. The map is point-symmetric, so both sides
-start equal. Code is in `proto/war/` (`node proto/tools/war_test.mjs` runs
+The same dynamics as an abstract, mobile-first 1v1 against a bot. The land
+is a network of cells; each belongs to a player or to no one and holds
+charge of its owner's colour. A cell fires when its charge reaches its
+number of links, sending one unit along each, and a unit arriving at someone
+else's cell cancels one of theirs (arriving at an empty cell takes it), so
+fronts form and fight on their own. Nodes are fixed: whoever holds the cell
+under one feeds charge through it. Your flow grows with the cells you own and
+is shared between your nodes, and each node you hold gives pull for wells.
+
+Everything is done with gestures on the board, with as many fingers as you
+like: **hold** your land to grow a well (the longer, the stronger), **hold**
+a well to strengthen it, **drag** it to move it, **tap** it to burst it, and
+**tap** a node to focus your flow through it. A well swallows nearby cells
+that aren't yours, charge and all, packing them in as yours; bursting it
+throws them over the front. A well breaks if the rival holds the ground
+under it. Win with 80% of the cells, or by taking all the rival's nodes. Maps
+are point-symmetric, and the board turns so that you are at the bottom (or
+on the left). Code is in `proto/war/` (`node proto/tools/war_test.mjs` runs
 its tests).
 
 ## Running locally

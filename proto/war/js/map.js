@@ -1,5 +1,5 @@
 // A skirmish map: the same on both sides (point-symmetric about the middle),
-// with each player's home spout at one end of the long axis, neutral spouts
+// with each player's home node at one end of the long axis, neutral nodes
 // between them, rock and cracks, and a patchwork of ground recipes expressed
 // as density and stretch fields.
 import { FREE, ROCK, CRACK, OUT } from '../../js/voronoi.js';
@@ -18,7 +18,7 @@ export function generateMap(seed, W = 320) {
 
   // outline: longer along the axis between the two homes; only even
   // harmonics, so it is the same after a half turn
-  const axis = R() * Math.PI;
+  const axis = Math.PI / 2 + (R() - 0.5) * 0.7;   // roughly top to bottom
   const harm = [4, 6].map(f => ({ f, a: (0.02 + R() * 0.03), ph: R() * Math.PI * 2 }));
   const radius = (a) => {
     let r = 1 + 0.12 * Math.cos(2 * (a - axis));
@@ -33,19 +33,19 @@ export function generateMap(seed, W = 320) {
   const vx = -uy, vy = ux;                           // across it
   const pos = (u, v) => [C + ux * u + vx * v, C + uy * u + vy * v];
 
-  // spouts: homes at the ends, three neutral pairs between
+  // nodes: homes at the ends, three neutral pairs between
   const L = W * 0.4 * 1.12;
-  const spouts = [];
+  const nodes = [];
   const pair = (u, v, home = false) => {
     const [x, y] = pos(u, v);
-    spouts.push({ x, y, home: home ? 0 : null });
-    spouts.push({ x: W - x, y: W - y, home: home ? 1 : null });
+    nodes.push({ x, y, home: home ? 0 : null });
+    nodes.push({ x: W - x, y: W - y, home: home ? 1 : null });
   };
   pair(-L * 0.72, (R() - 0.5) * W * 0.06, true);
   pair(-L * 0.3, (0.5 + R() * 0.12) * W * 0.4 * (R() < 0.5 ? 1 : -1));
   pair(-L * 0.06, -(0.45 + R() * 0.15) * W * 0.4);
   pair(-L * 0.45, (R() < 0.5 ? 1 : -1) * (0.15 + R() * 0.2) * W * 0.4);
-  const nearSpout = (x, y, d) => spouts.some(s => Math.hypot(s.x - x, s.y - y) < d);
+  const nearNode = (x, y, d) => nodes.some(s => Math.hypot(s.x - x, s.y - y) < d);
 
   const disc = (x0, y0, rad, fn) => {
     for (let y = Math.floor(y0 - rad); y <= y0 + rad; y++) for (let x = Math.floor(x0 - rad); x <= x0 + rad; x++) {
@@ -73,11 +73,11 @@ export function generateMap(seed, W = 320) {
     }
   };
   const setIfFree = (v) => sym((p) => { if (mask[p] === FREE) mask[p] = v; });
-  const randomSpot = (minFromSpout) => {
+  const randomSpot = (minFromNode) => {
     for (let k = 0; k < 400; k++) {
       const x = C + (R() - 0.5) * W * 0.8, y = C + (R() - 0.5) * W * 0.8;
       const p = at(Math.floor(x), Math.floor(y));
-      if (p < 0 || mask[p] !== FREE || nearSpout(x, y, minFromSpout)) continue;
+      if (p < 0 || mask[p] !== FREE || nearNode(x, y, minFromNode)) continue;
       return [x, y];
     }
     return null;
@@ -90,12 +90,12 @@ export function generateMap(seed, W = 320) {
   for (let k = 0; k < ridges; k++) { const q = randomSpot(30); if (q) walk(q[0], q[1], 4 + Math.floor(R() * 3), 8, 1.1, 3 + R() * 2, setIfFree(ROCK)); }
   const cracks = 1 + Math.floor(R() * 2);
   for (let k = 0; k < cracks; k++) { const q = randomSpot(36); if (q) walk(q[0], q[1], 3 + Math.floor(R() * 3), 6, 1.6, 2, setIfFree(CRACK)); }
-  // spouts stand on open ground
-  for (const s of spouts) disc(s.x, s.y, 10, (p) => { if (mask[p] !== OUT) mask[p] = FREE; });
+  // nodes stand on open ground
+  for (const s of nodes) disc(s.x, s.y, 10, (p) => { if (mask[p] !== OUT) mask[p] = FREE; });
 
   // anything sealed off from the homes becomes rock
   const seen = new Uint8Array(n);
-  const start = at(Math.floor(spouts[0].x), Math.floor(spouts[0].y));
+  const start = at(Math.floor(nodes[0].x), Math.floor(nodes[0].y));
   const stack = [start];
   seen[start] = 1;
   while (stack.length) {
@@ -105,8 +105,8 @@ export function generateMap(seed, W = 320) {
       if (q >= 0 && !seen[q] && mask[q] === FREE) { seen[q] = 1; stack.push(q); }
     }
   }
-  // every spout must be reachable; otherwise try another layout
-  if (spouts.some(sp => !seen[at(Math.floor(sp.x), Math.floor(sp.y))])) return generateMap(seed + 7919, W);
+  // every node must be reachable; otherwise try another layout
+  if (nodes.some(sp => !seen[at(Math.floor(sp.x), Math.floor(sp.y))])) return generateMap(seed + 7919, W);
   for (let p = 0; p < n; p++) if (mask[p] === FREE && !seen[p]) mask[p] = ROCK;
 
   // ground recipes: zones on one half, mirrored onto the other
@@ -144,7 +144,7 @@ export function generateMap(seed, W = 320) {
     for (let k = 0; k < 300 && boulders.length < 6; k++) {
       const x = R() * W, y = R() * W;
       const p = at(Math.floor(x), Math.floor(y));
-      if (p < 0 || zone[p] !== zi || mask[p] !== FREE || nearSpout(x, y, 30)) continue;
+      if (p < 0 || zone[p] !== zi || mask[p] !== FREE || nearNode(x, y, 30)) continue;
       if (Math.hypot(x - C, y - C) < 18) continue;
       if (boulders.some(b => Math.hypot(b[0] - x, b[1] - y) < 40 || Math.hypot(W - b[0] - x, W - b[1] - y) < 40)) continue;
       boulders.push([x, y, 11 + R() * 7]);
@@ -177,5 +177,5 @@ export function generateMap(seed, W = 320) {
     comb[k + 1] = Math.sin(2 * z.a) * 1.0;
   }
 
-  return { W, mask, rho0, comb, seeds, spouts, zones, zone, axis };
+  return { W, mask, rho0, comb, seeds, nodes, zones, zone, axis };
 }

@@ -1,9 +1,9 @@
 // A simple opponent. Every second or so it:
-//   - pours harder from spouts near its front line, less from safe ones;
-//   - picks a target: the nearest spout it doesn't hold;
+//   - pours harder from nodes near its front line, less from safe ones;
+//   - picks a target: the nearest node it doesn't hold;
 //   - keeps one well just behind its front, facing the target, at full pull;
 //   - after holding a well for a while, lifts it (the packed cells spread and
-//     their sand floods forward) and sets a new one further ahead.
+//     their charge floods forward) and sets a new one further ahead.
 import { NEUTRAL, RULES } from './war.js';
 
 export const LEVELS = {
@@ -55,16 +55,16 @@ export class Bot {
     const enemy = this.hops(c => own[c] === 1 - p);   // how far from the enemy
 
     // pour harder near the front, hardest where the enemy is close
-    w.spouts.forEach((sp) => {
+    w.nodes.forEach((sp) => {
       if (sp.owner !== p) return;
       const c = w.cellAt(sp.x, sp.y);
       const d = front[c], de = enemy[c];
       sp.share = de <= 3 ? 5 : d <= 1 ? 4 : d <= 3 ? 2.5 : d <= 6 ? 1.2 : 0.5;
     });
 
-    // target: the nearest spout we don't hold
+    // target: the nearest node we don't hold
     let best = -1, bd = Infinity;
-    w.spouts.forEach((sp, k) => {
+    w.nodes.forEach((sp, k) => {
       if (sp.owner === p) return;
       const c = w.cellAt(sp.x, sp.y);
       const d = reach[c] + (sp.owner === NEUTRAL ? 0 : 2);
@@ -72,7 +72,7 @@ export class Bot {
     });
     this.target = best;
     if (best < 0 || !this.cfg.wells) return;
-    const tg = w.spouts[best];
+    const tg = w.nodes[best];
 
     // the anchor: our land, a couple of cells behind the front, nearest the target
     let anchor = -1, ad = Infinity;
@@ -97,7 +97,7 @@ export class Bot {
     const well = mine[0];
     const age = w.time - well.t0;
     if (age > this.hold && Math.hypot(well.x - ax, well.y - ay) > well.r * 0.8) {
-      // lift it: the packed sand floods forward; set the next one next time
+      // lift it: the packed charge floods forward; set the next one next time
       w.liftWell(well);
       return;
     }

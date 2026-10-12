@@ -1,13 +1,14 @@
 // Skirmish rules. Every cell belongs to a player or to no one, and holds
-// sand of its owner's colour. A cell topples when it holds as many grains as
-// it has ways out, sending one grain each way. A grain that lands in someone
-// else's cell destroys one of theirs; landing in an empty cell takes it.
+// charge of its owner's colour. A cell fires when its charge reaches its
+// number of links (neighbours, plus edges and voids), sending one unit along
+// each. A unit arriving at someone else's cell cancels one of theirs; arriving
+// at an empty cell takes it.
 //
-// Spouts are fixed. Whoever owns the cell under a spout pours through it, and
-// how much you pour in total grows with how many cells you own. Each spout you
-// hold also gives you pull for wells: a well draws cells in from all around it
-// (anyone's), packing them densely; lift it and the packed cells spread back
-// out, and the sand they held floods outward.
+// Nodes are fixed. Whoever owns the cell under a node feeds charge into it,
+// and how much you feed in total grows with how many cells you own. Each node
+// you hold also gives you pull for wells: a well draws in cells around it
+// that aren't yours, charge and all, packing them densely as yours; release
+// it and the packed cells are thrown out over the front.
 import { Tess, buildGraph, FREE } from '../../js/voronoi.js';
 import { mulberry32 } from '../../js/region.js';
 import { computeRho, applyComb, relaxStep, wakeSeeds } from '../../js/shape.js';
@@ -21,16 +22,17 @@ export const RULES = {
   rounds: 24,          // toppling rounds per second
   flowBase: 1,         // grains/s every player pours, plus...
   flowPerCell: 0.08,   // ...this much per cell owned
-  pullPerSpout: 2,     // pull for wells, per spout held
+  pullPerNode: 2,     // pull for wells, per node held
   maxPull: 8,          // the most pull one well can have
   accrete: 0.15,       // cells a well swallows per second, per pull
   capacity: 4,         // cells a well can hold beyond its share, per pull
   wellR: 26, minR: 14, maxR: 40,
-  homeR: 24,           // starting land around each home spout
-  garrisonR: 20, garrison: 3,   // neutral sand guarding the other spouts
-  outAfter: 12,        // seconds with no spout before a player is out
+  homeR: 24,           // starting land around each home node
+  garrisonR: 20, garrison: 3,   // neutral charge guarding the other nodes
+  focus: 4,            // a focused node takes this many shares of your flow
+  outAfter: 12,        // seconds with no node before a player is out
   winShare: 0.8,       // ...or own this share of the cells
-  relaxEvery: 0.08,    // seconds between relaxation steps while the land moves
+  relaxEvery: 0.15,    // seconds between relaxation steps while the land moves
   reach: 3.5,          // how far a well reaches for cells to swallow, in well radii
   wellGrace: 2,        // seconds someone else must hold a well's ground to break it
 };
@@ -45,12 +47,12 @@ export class War {
     this.map = generateMap(this.seed, W);
     this.mask = this.map.mask;
     this.tess = new Tess(W, W, this.mask);
-    this.spouts = this.map.spouts.map(s => ({ x: s.x, y: s.y, home: s.home, owner: s.home ?? NEUTRAL, share: 1, acc: 0 }));
+    this.nodes = this.map.nodes.map(s => ({ x: s.x, y: s.y, home: s.home, owner: s.home ?? NEUTRAL, share: 1, acc: 0 }));
     this.wells = [];
     this.nextWell = 1;
     this.time = 0;
     this.over = null;
-    this.noSpout = [0, 0];
+    this.noNode = [0, 0];
     this.cellsOwned = [0, 0];
     this.stats = { topples: [0, 0], peak: [0, 0], taken: [0, 0], released: [0, 0], swallowed: [0, 0], thrown: [0, 0] };
     this.roundAcc = 0;
@@ -87,9 +89,9 @@ export class War {
     t.rebuild();
   }
 
-  // Build the graph for the current cells and carry the sand over. Cells keep
-  // their sand and owner as they drift; a cell that was swallowed pours its
-  // sand into whichever cell now covers where it was (merging with it, or
+  // Build the graph for the current cells and carry the charge over. Cells keep
+  // their charge and owner as they drift; a cell that was swallowed pours its
+  // charge into whichever cell now covers where it was (merging with it, or
   // fighting it); a cell that appeared starts empty, owned by whoever owned
   // that spot.
   relayout(prev, teleported) {
@@ -98,13 +100,13 @@ export class War {
     const own = new Int8Array(n).fill(NEUTRAL), grains = new Float64Array(n);
     if (!prev) {
       for (let c = 0; c < n; c++) {
-        for (const sp of this.spouts) {
+        for (const sp of this.nodes) {
           const d = Math.hypot(g.cx[c] - sp.x, g.cy[c] - sp.y);
           if (sp.home !== null && d < RULES.homeR) { own[c] = sp.home; grains[c] = g.thr[c] - 1; }
           else if (sp.home === null && d < RULES.garrisonR) grains[c] = Math.min(g.thr[c] - 1, RULES.garrison);
         }
       }
-      for (const sp of this.spouts) {
+      for (const sp of this.nodes) {
         const c = g.cellOf[this.tess.lab[this.tess.pixel(sp.x, sp.y)]];
         if (sp.home !== null) { own[c] = sp.home; grains[c] = g.thr[c] - 1; }
       }
@@ -114,8 +116,8 @@ export class War {
       const lab = this.tess.lab;
       for (let oc = 0; oc < prev.g.n; oc++) {
         const s = prev.g.slotOf[oc];
-        // a swallowed cell keeps its sand, now its new owner's; a collapsed
-        // cell leaves its sand behind in whichever cell covers where it was
+        // a swallowed cell keeps its charge, now its new owner's; a collapsed
+        // cell leaves its charge behind in whichever cell covers where it was
         const mode = teleported ? teleported.get(s) : undefined;
         let o = prev.own[oc];
         let tc = mode === COLLAPSED ? -1 : g.cellOf[s];
@@ -164,16 +166,16 @@ export class War {
   }
   ownerAt(x, y) { const c = this.cellAt(x, y); return c >= 0 ? this.own[c] : NEUTRAL; }
   flow(p) { return this.flowMult[p] * (RULES.flowBase + RULES.flowPerCell * this.cellsOwned[p]); }
-  spoutsOf(p) { return this.spouts.filter(s => s.owner === p); }
-  pullBudget(p) { return RULES.pullPerSpout * this.spoutsOf(p).length; }
+  nodesOf(p) { return this.nodes.filter(s => s.owner === p); }
+  pullBudget(p) { return RULES.pullPerNode * this.nodesOf(p).length; }
   pullUsed(p) { return this.wells.reduce((a, w) => a + (w.owner === p ? w.pull : 0), 0); }
   pullFree(p) { return this.pullBudget(p) - this.pullUsed(p); }
-  // when a player loses spouts, their wells weaken to fit what is left
+  // when a player loses nodes, their wells weaken to fit what is left
   pullScale(p) { const u = this.pullUsed(p); return u > 0 ? Math.min(1, this.pullBudget(p) / u) : 1; }
-  spoutRate(k) {
-    const sp = this.spouts[k];
+  nodeRate(k) {
+    const sp = this.nodes[k];
     if (sp.owner < 0) return 0;
-    const mine = this.spoutsOf(sp.owner);
+    const mine = this.nodesOf(sp.owner);
     const tot = mine.reduce((a, s) => a + s.share, 0) || 1;
     return this.flow(sp.owner) * sp.share / tot;
   }
@@ -183,14 +185,14 @@ export class War {
     for (let i = 0; i < this.g.n; i++) if (this.own[i] >= 0) c[this.own[i]]++;
     this.cellsOwned = c;
     for (let p = 0; p < 2; p++) if (c[p] > this.stats.peak[p]) this.stats.peak[p] = c[p];
-    for (const sp of this.spouts) {
+    for (const sp of this.nodes) {
       const o = this.ownerAt(sp.x, sp.y);
       if (o !== sp.owner) {
         const from = sp.owner;
         sp.owner = o;
         sp.share = 1;
         sp.acc = 0;
-        this.emit('spout', { k: this.spouts.indexOf(sp), from, to: o });
+        this.emit('node', { k: this.nodes.indexOf(sp), from, to: o });
       }
     }
   }
@@ -201,9 +203,9 @@ export class War {
     this.time += dt;
     this.count();
     // pour
-    this.spouts.forEach((sp, k) => {
+    this.nodes.forEach((sp, k) => {
       if (sp.owner < 0) return;
-      sp.acc += this.spoutRate(k) * dt;
+      sp.acc += this.nodeRate(k) * dt;
       const whole = Math.floor(sp.acc);
       if (whole <= 0) return;
       sp.acc -= whole;
@@ -233,8 +235,8 @@ export class War {
     }
     // the end
     for (let p = 0; p < 2; p++) {
-      this.noSpout[p] = this.spoutsOf(p).length ? 0 : this.noSpout[p] + dt;
-      if (this.noSpout[p] >= RULES.outAfter) return this.finish(1 - p, 'spouts');
+      this.noNode[p] = this.nodesOf(p).length ? 0 : this.noNode[p] + dt;
+      if (this.noNode[p] >= RULES.outAfter) return this.finish(1 - p, 'nodes');
       if (this.cellsOwned[p] >= RULES.winShare * this.g.n) return this.finish(p, 'land');
     }
   }
@@ -244,7 +246,7 @@ export class War {
     this.emit('over', this.over);
   }
 
-  // Sand of player p arrives in cell c.
+  // Charge of player p arrives in cell c.
   add(c, p, k) {
     const o = this.own[c];
     if (o === p) { this.grains[c] += k; return; }
@@ -281,7 +283,7 @@ export class War {
       inc[0][b] = inc[1][b] = 0;
       const o = own[b];
       if (o >= 0) {
-        // the owner's own sand joins the defence
+        // the owner's own charge joins the defence
         const d = gr[b] + (o === 0 ? a0 : a1), a = o === 0 ? a1 : a0;
         if (a > d) { own[b] = 1 - o; gr[b] = a - d; this.taken[b] = 1; this.stats.taken[1 - o]++; }
         else gr[b] = d - a;
@@ -333,13 +335,13 @@ export class War {
     return true;
   }
 
-  spoutCells() { return new Set(this.spouts.map(sp => this.cellAt(sp.x, sp.y))); }
+  nodeCells() { return new Set(this.nodes.map(sp => this.cellAt(sp.x, sp.y))); }
 
   // Each well swallows the nearest cells within reach that aren't its
-  // owner's: they reappear inside the well, sand and all, as its owner's.
+  // owner's: they reappear inside the well, charge and all, as its owner's.
   accrete(teleported) {
     const g = this.g, own = this.own, seeds = this.tess.seeds;
-    const anchors = this.spoutCells(), split = new Set();
+    const anchors = this.nodeCells(), split = new Set();
     let n = 0;
     for (const w of this.wells) {
       const cap = this.capacity(w);
@@ -373,11 +375,11 @@ export class War {
 
   // A lifted (or broken) well bursts: as many of its owner's smallest cells
   // as it swallowed spring out over the front, each splitting the nearest
-  // cell that isn't theirs, and carry their sand with them.
+  // cell that isn't theirs, and carry their charge with them.
   collapse(teleported) {
     if (!this.pending.length) return 0;
     const g = this.g, seeds = this.tess.seeds, own = this.own;
-    const anchors = this.spoutCells();
+    const anchors = this.nodeCells();
     let n = 0;
     for (const z of this.pending) {
       const near = [], out = [];
@@ -436,14 +438,30 @@ export class War {
     this.reshape();
   }
 
+  // Focus a node: it takes the lion's share of its owner's flow.
+  toggleFocus(k) {
+    const sp = this.nodes[k];
+    sp.share = sp.share > 1 ? 1 : RULES.focus;
+    return sp.share > 1;
+  }
+
+  // Set a well's pull directly (as far as the owner's free pull allows).
+  setPull(w, pull) {
+    w.pull = Math.max(0.5, Math.min(RULES.maxPull, this.pullFree(w.owner) + w.pull, pull));
+    const over = Math.floor(w.extra - this.capacity(w));
+    if (over > 0) { w.extra -= over; this.pending.push({ x: w.x, y: w.y, r: w.r, extra: over, owner: w.owner }); }
+    w.starved = 0;
+    this.reshape();
+  }
+
   adjustShare(k, dir) {
-    const sp = this.spouts[k];
+    const sp = this.nodes[k];
     sp.share = Math.max(0.25, Math.min(8, sp.share * (dir > 0 ? 1.25 : 0.8)));
   }
 
-  nearestSpout(x, y, within) {
+  nearestNode(x, y, within) {
     let best = -1, bd = within * within;
-    this.spouts.forEach((s, k) => { const d = (s.x - x) ** 2 + (s.y - y) ** 2; if (d < bd) { bd = d; best = k; } });
+    this.nodes.forEach((s, k) => { const d = (s.x - x) ** 2 + (s.y - y) ** 2; if (d < bd) { bd = d; best = k; } });
     return best;
   }
   nearestWell(x, y, within, p = null) {
@@ -452,7 +470,7 @@ export class War {
     return best;
   }
 
-  totalSand(p) { let s = 0; for (let c = 0; c < this.g.n; c++) if (this.own[c] === p) s += this.grains[c]; return s; }
+  totalCharge(p) { let s = 0; for (let c = 0; c < this.g.n; c++) if (this.own[c] === p) s += this.grains[c]; return s; }
 }
 
 // Forces meet in one cell: [owner, amount, present]. The largest wins and
