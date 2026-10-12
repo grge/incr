@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <title>Topple — Skirmish prototype</title>
+  <meta name="theme-color" content="#0b0e14">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0e14'/%3E%3Cpath d='M16 4l10 6v12l-10 6-10-6V10z' fill='none' stroke='%2340e0d0' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23ff8048'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="war.css">
+</head>
+<body>
+  <div id="app">
+    <header id="hud">
+      <div class="row top">
+        <span id="youCount" class="count you">0</span>
+        <div id="bar"><div id="barYou"></div><div id="barRival"></div><i class="goal g0"></i><i class="goal g1"></i></div>
+        <span id="rivalCount" class="count rival">0</span>
+        <button id="menuBtn" class="icon" aria-label="Menu">☰</button>
+      </div>
+      <div class="row sub"><span id="youInfo" class="you"></span><span id="clock"></span><span id="rivalInfo" class="rival"></span></div>
+    </header>
+    <div id="boardWrap"><canvas id="board" aria-label="The board"></canvas><div id="toast" class="hidden"></div></div>
+    <footer id="foot">
+      <div id="pull"><span class="lbl">pull</span><div id="pullTrack"><div id="pullBudget"></div><div id="pullUsed"></div></div><span id="pullText"></span></div>
+      <div id="tip"></div>
+    </footer>
+  </div>
+
+  <div id="intro" class="overlay hidden">
+    <div class="card">
+      <h1>Skirmish</h1>
+      <p class="lead">Cells fill with charge and fire into their neighbours. Your charge cancels the rival's. Take the land, take the nodes.</p>
+      <ul class="gestures">
+        <li><b class="g">hold</b><span>your land to grow a <em>well</em>. The longer you hold, the stronger it pulls. A well swallows nearby cells that aren't yours, charge and all.</span></li>
+        <li><b class="g">tap</b><span>your well to <em>burst</em> it: the cells it swallowed are thrown out over the front.</span></li>
+        <li><b class="g">drag</b><span>your well to move it.</span></li>
+        <li><b class="g">tap</b><span>your node to <em>focus</em> your flow through it.</span></li>
+      </ul>
+      <p class="small">Your flow grows with the cells you own. Each node you hold gives 2 pull for wells. A well breaks if the rival holds the ground under it. Win with 80% of the cells, or by taking every node the rival has.</p>
+      <div class="actions"><button id="startBtn" class="btn primary">Play</button></div>
+    </div>
+  </div>
+
+  <div id="menu" class="overlay hidden">
+    <div class="card">
+      <h2>Paused</h2>
+      <div class="actions col">
+        <button class="btn primary" data-act="resume">Resume</button>
+        <button class="btn" data-act="rules">How to play</button>
+        <button class="btn" data-act="restart">Restart this map</button>
+        <button class="btn" data-act="new">New map</button>
+      </div>
+      <div class="opt"><span>Rival</span><div class="seg" id="levelSeg"><button data-level="easy">easy</button><button data-level="normal">normal</button><button data-level="hard">hard</button></div></div>
+      <div class="opt"><span>Pace</span><div class="seg" id="speedSeg"><button data-speed="1">1×</button><button data-speed="1.5">1.5×</button><button data-speed="2">2×</button><button data-speed="3">3×</button></div></div>
+      <p class="small"><a href="../">← the incremental prototype</a></p>
+    </div>
+  </div>
+
+  <div id="end" class="overlay hidden"><div class="card" id="endCard"></div></div>
+  <noscript><p style="padding:2em;color:#ddd">This prototype needs JavaScript.</p></noscript>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
