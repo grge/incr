@@ -175,3 +175,5 @@ purchases compound, `node tools/tune_late.mjs <base.json>` then tunes the late
 kiln, trials and the Great Hourglass together with full playthroughs, and
 `node tools/apply_calibration.mjs` writes the result into `js/data.js`. `node tools/test.mjs` runs the
 logic tests (also run by the deploy workflow).
+
+Topple is one of a family of game experiments, indexed in the private repo `grge/idle-games-project`.
